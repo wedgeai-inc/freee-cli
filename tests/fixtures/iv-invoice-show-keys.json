@@ -1,0 +1,299 @@
+{
+  "_source": ".iv-schema.yml",
+  "_upstream": "https://raw.githubusercontent.com/freee/freee-api-schema/master/iv/open-api-3/api-schema.yml",
+  "_upstreamSha256": "76bb9fbcf78f0f01ac038c5e953be2eb604e4aa25aded53790f437aa90889f04",
+  "_retrieved": "2026-09-08",
+  "_note": "scripts/gen-iv-invoice-show-keys.mjs で再生成する。手で編集しない。",
+  "invoice": [
+    "id",
+    "company_id",
+    "invoice_number",
+    "branch_no",
+    "subject",
+    "template_id",
+    "template_name",
+    "billing_date",
+    "issue_date",
+    "payment_date",
+    "payment_type",
+    "invoice_note",
+    "memo",
+    "sending_status",
+    "payment_status",
+    "cancel_status",
+    "deal_status",
+    "deal_id",
+    "tax_entry_method",
+    "tax_fraction",
+    "line_amount_fraction",
+    "withholding_tax_entry_method",
+    "total_amount",
+    "created_at",
+    "amount_withholding_tax",
+    "amount_including_tax",
+    "amount_excluding_tax",
+    "amount_tax",
+    "amount_including_tax_10",
+    "amount_excluding_tax_10",
+    "amount_tax_10",
+    "amount_including_tax_8",
+    "amount_excluding_tax_8",
+    "amount_tax_8",
+    "amount_including_tax_8_reduced",
+    "amount_excluding_tax_8_reduced",
+    "amount_tax_8_reduced",
+    "amount_including_tax_0",
+    "amount_excluding_tax_0",
+    "amount_tax_0",
+    "amount_brought_forward",
+    "partner_id",
+    "partner_code",
+    "partner_name",
+    "partner_title",
+    "partner_address_zipcode",
+    "partner_address_prefecture_code",
+    "partner_address_street_name1",
+    "partner_address_street_name2",
+    "partner_contact_department",
+    "partner_contact_name",
+    "partner_display_name",
+    "partner_bank_account",
+    "company_contact_name",
+    "company_name",
+    "company_description",
+    "bank_account_to_transfer",
+    "template",
+    "lines",
+    "email_url_file_downloaded_at",
+    "email_url_file_downloaded_status",
+    "report_url",
+    "sales_management_origin"
+  ],
+  "lines": [
+    "id",
+    "type",
+    "description",
+    "sales_date",
+    "unit",
+    "quantity",
+    "unit_price",
+    "tax_rate",
+    "reduced_tax_rate",
+    "withholding",
+    "amount_excluding_tax"
+  ],
+  "putResponseLines": [
+    "id",
+    "type",
+    "description",
+    "sales_date",
+    "unit",
+    "quantity",
+    "unit_price",
+    "tax_rate",
+    "reduced_tax_rate",
+    "withholding",
+    "amount_excluding_tax",
+    "account_item_id",
+    "tax_code",
+    "item_id",
+    "section_id",
+    "tag_ids",
+    "segment_1_tag_id",
+    "segment_2_tag_id",
+    "segment_3_tag_id"
+  ],
+  "requestConstraints": {
+    "company_id": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775000
+    },
+    "template_id": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775000
+    },
+    "invoice_number": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "branch_no": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "billing_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "issue_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "payment_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "payment_type": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "tax_entry_method": {
+      "type": "string"
+    },
+    "tax_fraction": {
+      "type": "string"
+    },
+    "line_amount_fraction": {
+      "type": "string"
+    },
+    "withholding_tax_entry_method": {
+      "type": "string"
+    },
+    "include_amount_brought_forward": {
+      "type": "boolean"
+    },
+    "amount_brought_forward": {
+      "type": "integer",
+      "minimum": -999999999999,
+      "maximum": 999999999999
+    },
+    "invoice_note": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 4000
+    },
+    "memo": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "partner_id": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775000
+    },
+    "partner_code": {
+      "type": "string"
+    },
+    "partner_title": {
+      "type": "string"
+    },
+    "partner_address_zipcode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10,
+      "pattern": "^[0-9]{3}-?[0-9]{4}$"
+    },
+    "partner_address_prefecture_code": {
+      "type": "integer",
+      "minimum": -1,
+      "maximum": 46
+    },
+    "partner_address_street_name1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "partner_address_street_name2": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "partner_contact_department": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "partner_contact_email_cc": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "partner_contact_email_to": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "partner_contact_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "partner_display_name": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "partner_sending_method": {
+      "type": "string"
+    },
+    "partner_bank_account": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "company_contact_name": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "company_name": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "company_description": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "bank_account_to_transfer": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "lines": {
+      "type": "array"
+    }
+  },
+  "requestEnums": {
+    "tax_entry_method": [
+      "in",
+      "out"
+    ],
+    "tax_fraction": [
+      "omit",
+      "round_up",
+      "round"
+    ],
+    "line_amount_fraction": [
+      "omit",
+      "round_up",
+      "round"
+    ],
+    "withholding_tax_entry_method": [
+      "in",
+      "out"
+    ],
+    "partner_title": [
+      "御中",
+      "様",
+      "(空白)",
+      "（空白）"
+    ],
+    "payment_type": [
+      "transfer",
+      "direct_debit",
+      "card"
+    ],
+    "lines.type": [
+      "item",
+      "text"
+    ],
+    "lines.tax_rate": [
+      0,
+      8,
+      10
+    ]
+  }
+}

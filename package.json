@@ -1,0 +1,29 @@
+{
+  "name": "freee-cli",
+  "version": "0.1.0",
+  "description": "Unofficial command-line interface for the freee public API",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "freee": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "runtime-oauth-exec": "tsx src/commands/auth/runtime-oauth-exec.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "typescript": "^5.8.3",
+    "tsx": "^4.20.6",
+    "vitest": "^3.2.4"
+  }
+}

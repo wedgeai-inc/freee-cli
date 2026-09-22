@@ -1,0 +1,11 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { isSensitivePiiKey } from "./redactor.js";
+export interface QuotationAuditEntry { timestamp: string; task_id: string; event: "quotation_create"; mode: "dry-run" | "execute"; status: "planned" | "created" | "failed"; company_id: number; payload_redacted: unknown; created_id?: number; reason?: string; post_state?: "not_attempted" | "rejected" | "unknown" | "succeeded"; }
+export interface QuotationCancelAuditEntry { timestamp: string; task_id: string; event: "quotation_cancel"; mode: "dry-run" | "execute"; status: "planned" | "canceled" | "failed"; company_id: number; quotation_id: number; reason?: string; put_state?: "not_attempted" | "rejected" | "unknown" | "succeeded"; }
+export interface QuotationUncancelAuditEntry { timestamp: string; task_id: string; event: "quotation_uncancel"; mode: "dry-run" | "execute"; status: "planned" | "uncanceled" | "failed"; company_id: number; quotation_id: number; reason?: string; put_state?: "not_attempted" | "rejected" | "unknown" | "succeeded"; }
+function check(value: unknown, path = ""): void { if (typeof value === "string" && (/bearer\s+\S+/i.test(value) || /[^\s@,;]+@[^\s@,;]+/.test(value))) throw new Error(`QuotationAuditEntry: redact漏れを検知 — ${path}`); if (value && typeof value === "object") for (const [key, child] of Object.entries(value as Record<string, unknown>)) { if (isSensitivePiiKey(key) && child != null && child !== "[REDACTED]") throw new Error(`QuotationAuditEntry: redact漏れを検知 — ${key}`); check(child, key); } }
+function append(logDir: string, name: string, entry: unknown & { timestamp: string }): void { check(entry); mkdirSync(logDir, { recursive: true }); appendFileSync(join(logDir, `freee-quotation-${name}-${entry.timestamp.slice(0, 10)}.jsonl`), JSON.stringify(entry) + "\n", "utf8"); }
+export async function appendQuotationAudit(logDir: string, entry: QuotationAuditEntry): Promise<void> { append(logDir, "create", entry); }
+export async function appendQuotationCancelAudit(logDir: string, entry: QuotationCancelAuditEntry): Promise<void> { append(logDir, "cancel", entry); }
+export async function appendQuotationUncancelAudit(logDir: string, entry: QuotationUncancelAuditEntry): Promise<void> { append(logDir, "uncancel", entry); }
