@@ -18,7 +18,7 @@
     "runtime-oauth-exec": "tsx src/commands/auth/runtime-oauth-exec.ts"
   },
   "dependencies": {
-    "commander": "^12.1.0"
+    "commander": "^15.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",
