@@ -1,0 +1,35 @@
+name: ❓ Question
+description: Ask a question about using freee-cli
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question? We're here to help!
+
+        **Do not paste real freee data.** This repository is public. Redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or replace them with dummy values. See the [方針](https://github.com/wedgeai-inc/freee-cli/blob/main/CONTRIBUTING.md#方針) section of CONTRIBUTING.md.
+
+        **Report vulnerabilities privately.** Do not open a public issue. Use GitHub [Private vulnerability reporting](https://github.com/wedgeai-inc/freee-cli/security/advisories/new), as described in [SECURITY.md](https://github.com/wedgeai-inc/freee-cli/blob/main/SECURITY.md). Do not include tokens, Client Secrets, or real freee data; use dummy values.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What would you like to know about freee-cli?
+      placeholder: |
+        How do I configure this project?
+        What usage pattern do you recommend for...?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: |
+        Any additional context or what you've already tried. If you paste logs or steps, redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or use dummy values.
+      placeholder: |
+        I've tried... but I'm getting...
+        I looked at the documentation but...
+    validations:
+      required: false

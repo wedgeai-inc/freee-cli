@@ -1,0 +1,91 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below to help us fix it.
+
+        **Do not paste real freee data.** This repository is public. Redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or replace them with dummy values. See the [方針](https://github.com/wedgeai-inc/freee-cli/blob/main/CONTRIBUTING.md#方針) section of CONTRIBUTING.md.
+
+        **Report vulnerabilities privately.** Do not open a public issue. Use GitHub [Private vulnerability reporting](https://github.com/wedgeai-inc/freee-cli/security/advisories/new), as described in [SECURITY.md](https://github.com/wedgeai-inc/freee-cli/blob/main/SECURITY.md). Do not include tokens, Client Secrets, or real freee data; use dummy values.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is
+      placeholder: |
+        When I run `freee --help`, I get an error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Steps to reproduce the behavior. Do not paste real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, or Client Secrets; redact them or use dummy values.
+      placeholder: |
+        1. Run `freee --help`
+        2. Observe error message
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen
+      placeholder: The command should complete successfully
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: |
+        What actually happened (include error messages if any). Before pasting logs, redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or use dummy values.
+      placeholder: |
+        Error: Authentication failed...
+    validations:
+      required: true
+
+  - type: input
+    id: project_version
+    attributes:
+      label: "freee-cli version"
+      description: The `version` field in package.json, or the commit SHA. The `freee` command does not implement `--version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: runtime
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`. Node.js 22 or newer is required.
+      placeholder: "v22.0.0"
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: e.g., macOS 14.2, Ubuntu 22.04, Windows 11
+      placeholder: "macOS 14.2"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: |
+        Any other context, screenshots, or logs that might help. Before pasting logs, redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or use dummy values.
+    validations:
+      required: false

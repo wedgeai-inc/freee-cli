@@ -1,0 +1,52 @@
+name: 💡 Feature Request
+description: Suggest a new feature or enhancement
+labels: ["enhancement", "needs-discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Please provide details below.
+
+        **Do not paste real freee data.** This repository is public. Redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or replace them with dummy values. See the [方針](https://github.com/wedgeai-inc/freee-cli/blob/main/CONTRIBUTING.md#方針) section of CONTRIBUTING.md.
+
+        **Report vulnerabilities privately.** Do not open a public issue. Use GitHub [Private vulnerability reporting](https://github.com/wedgeai-inc/freee-cli/security/advisories/new), as described in [SECURITY.md](https://github.com/wedgeai-inc/freee-cli/blob/main/SECURITY.md). Do not include tokens, Client Secrets, or real freee data; use dummy values.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this feature solve?
+      placeholder: |
+        Currently, there's no way to...
+        This makes it difficult to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like this feature to work?
+      placeholder: |
+        Add a new option or workflow that allows users to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other solutions or workarounds have you considered?
+      placeholder: |
+        I tried using... but it doesn't work because...
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: |
+        Any other context, mockups, or examples. If you paste logs or steps, redact real company IDs, partner names, personal names, email addresses, amounts, access tokens, refresh tokens, and Client Secrets, or use dummy values.
+    validations:
+      required: false
