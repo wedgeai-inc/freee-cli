@@ -21,7 +21,7 @@
     "commander": "^12.1.0"
   },
   "devDependencies": {
-    "@types/node": "^22.15.17",
+    "@types/node": "^26.5.1",
     "typescript": "^5.8.3",
     "tsx": "^4.20.6",
     "vitest": "^3.2.4"
