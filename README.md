@@ -15,9 +15,10 @@
 
 ## 必要なもの
 
+- macOS・Linux などの POSIX 環境。**現在の実装は Windows ネイティブ環境では認証方式にかかわらず起動しません**（起動判定が Windows 形式のパスと一致しないため）
 - Node.js 22.12 以上
 - freee アプリストアで作成したアプリ（Client ID / Client Secret）
-- token の保管に 1Password CLI（`op`）を使う場合は、その CLI。この方式は `/bin/sh`・`/bin/cat` と POSIX のプロセスグループ操作を使うため、Windows ネイティブ環境では動きません
+- token の保管に 1Password CLI（`op`）を使う場合は、その CLI。この方式は `/bin/sh`・`/bin/cat` と POSIX のプロセスグループ操作を使います
 
 ## インストール
 
@@ -31,10 +32,13 @@ node dist/src/cli.js --help
 
 `--help` でヘルプ本文が表示されることを確かめてください。**リポジトリまでの絶対パスに空白・日本語・`#` など URL エンコードされる文字が含まれると、CLI は何もせず終了コード 0 で終わります**（パスを引用符で囲んでも回避できません）。runtime OAuth の plan もこの状態では各コマンドを実行しないまま成功扱いになるため、こうした文字を含まない場所に clone してください。
 
-以降の例は `freee` コマンドで書いています。次のように alias を設定するか、`freee` を `node dist/src/cli.js` に読み替えてください。
+以降の例は `freee` コマンドで書いています。リポジトリのルートで次のようにシェル関数を設定するか、`freee` を `node dist/src/cli.js` に読み替えてください（パスに `(` や `$` が含まれても壊れないよう、alias ではなく関数にしています）。
 
 ```bash
-alias freee="node $(pwd)/dist/src/cli.js"
+FREEE_CLI_JS="$(pwd -P)/dist/src/cli.js"
+freee() {
+  node "$FREEE_CLI_JS" "$@"
+}
 ```
 
 ## 認証
