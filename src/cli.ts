@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { isMainModule } from "./lib/main-module.js";
 import { loadApiAuth } from "./lib/token-config-loader.js";
 import { OnePasswordTokenStore } from "./lib/one-password-token-store.js";
 import { runOAuthLogin } from "./commands/auth/oauth-login.js";
@@ -515,7 +516,7 @@ export function createProgram(): Command {
   return program;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url, process.argv[1])) {
   createProgram().parseAsync(process.argv).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Error: ${message}`);
