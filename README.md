@@ -8,14 +8,16 @@
 
 - **書き込みは dry-run が既定です。** 請求書・見積書・取引先を変更するコマンドは、`--execute` を付けたときだけ API へ書き込みます。
 - **対象の取り違えを防ぎます。** 取消・復元・更新の実行時には、請求書番号・見積書番号・取引先名の完全一致を要求します。
-- **書き込みの記録を残します。** 実行結果を `./audit-logs/` に JSONL で保存します。メールアドレス・氏名・Authorization ヘッダーなど、既知の項目名の値はマスクします。件名や明細の摘要など自由記述の欄はマスクしないので、記録ファイルの扱いに注意してください。
+- **書き込みの記録を残します。** 実行結果を `./audit-logs/` に JSONL で保存します。メールアドレス・氏名・Authorization ヘッダーなど既知の項目名の値に加え、自由記述の中でもメールアドレスの形に一致する部分はマスクします。ただし個人情報を網羅的に検出するものではなく、件名・摘要や請求書・見積書の `partner_display_name` などはそのまま残ります。記録ファイルの扱いに注意してください。
 - **token をファイルに平文で保存しません。** 認証情報は 1Password に保管するか、実行時にだけメモリ上で扱います。
+
+> **エラー終了は「書き込まれていない」ことを意味しません。** 書き込み系コマンドは API へ送ってから読み戻し・記録保存をするため、送信後の結果不明・読み戻し失敗・記録保存の失敗でもエラー終了し、記録が `failed` になったり残らなかったりします。エラー終了したら、freee Web や `get` / `list` で対象を確かめるまで再実行しないでください。
 
 ## 必要なもの
 
 - Node.js 22.12 以上
 - freee アプリストアで作成したアプリ（Client ID / Client Secret）
-- token の保管に 1Password CLI（`op`）を使う場合は、その CLI
+- token の保管に 1Password CLI（`op`）を使う場合は、その CLI。この方式は `/bin/sh`・`/bin/cat` と POSIX のプロセスグループ操作を使うため、Windows ネイティブ環境では動きません
 
 ## インストール
 
@@ -44,6 +46,8 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 
 1Password を使わない場合は、`FREEE_ACCESS_TOKEN` 環境変数に access token を設定しても実行できます。この場合、token の自動更新は行いません。
 
+**`FREEE_ACCESS_TOKEN` が設定されていると、`--profile` の指定にかかわらず最優先で使われます。** 1Password の profile を使うときは、この環境変数を解除してください。
+
 ## コマンド
 
 以下の例の `--company-id 1234567` は、ご自身の事業所 ID に置き換えてください。事業所 ID は `freee companies list` で確認できます。
@@ -63,7 +67,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 
 共通のオプション:
 
-- `--format json|table`: 読み取り系の出力形式（既定 `json`。`export` と `partners get` は JSON 固定）
+- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get` は JSON 固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
 - `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）
 - `--task-id <id>`: audit log に記録する task ID
 - `--profile <name>`: 1Password 管理の OAuth で使う profile（`FREEE_OAUTH_PROFILE` でも指定可）
@@ -92,14 +96,15 @@ freee partners create --company-id 1234567 --plan ./partner-plan.json
 freee partners create --company-id 1234567 --plan ./partner-plan.json --execute
 ```
 
-plan は `POST /api/1/partners` の body から `company_id` を除いた JSON です。body を `partner` でラップしません。
+plan は `POST /api/1/partners` の body のうち、CLI が対応する項目だけを書いた JSON です（許可する項目は [`src/domain/partner-plan.ts`](./src/domain/partner-plan.ts)）。body を `partner` でラップしません。`company_id` と、口座・振込に関わる `payer_walletable_id` / `transfer_fee_handling_side` / `partner_bank_account_attributes`、未知のキーは拒否します。
 
 ```json
 {"name":"株式会社サンプル","code":"sample","default_title":"御中","country_code":"JP"}
 ```
 
 - `name` は空・空白のみを拒否します。`code` は255文字以内かつ空・空白のみを拒否します。`default_title` は `"御中"` / `"様"` / `""` のみです（いずれも CLI 固有の制限）。
-- `shortcut1` / `shortcut2` / `long_name` / `name_kana` / `contact_name` / `email` / `phone` / `zipcode` / `street_name1` / `street_name2` は空文字列を許します。
+- `shortcut1` / `shortcut2` / `long_name` / `name_kana` / `contact_name` / `email` / `phone` / `address_attributes.zipcode` / `address_attributes.street_name1` / `address_attributes.street_name2` は空文字列を許します。住所の項目は `address_attributes` の下に書きます。
+- 読み戻しで指定値との一致を確認できなかった項目は `created.ignored` に出ます。**空でなくても終了コードは成功**なので、実行後に確認し、残った項目は freee Web で確かめてください。
 - コマンド自身は POST 後に再試行しません。`unknown` で終了した場合、プロセスをまたぐ重複は自動判定できないため、再実行前に `partners search` で作成済みか確認してください。
 
 #### 取得・更新（dry-run 既定）
@@ -116,7 +121,7 @@ freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json
 {"available":false,"address_attributes":{"zipcode":"1000001"}}
 ```
 
-- PUT 後に読み戻しを行います。結果不明で終了した場合は、再実行せず freee Web で対象を確認してください。
+- PUT 後に読み戻しを行います。指定値との一致を確認できなかった項目は `updated.ignored` に出ます。**空でなくても終了コードは成功**なので、実行後に確認してください。結果不明で終了した場合は、再実行せず freee Web で対象を確認してください。
 
 ### 請求書
 
@@ -129,7 +134,8 @@ freee invoices templates --company-id 1234567 --format table
 ```
 
 - `list` は `--partner-ids 1,2,3`（最大3件）、`--sending-status sent|unsent`、`--payment-status settled|unsettled|canceled|unprocessed|failed` で絞り込めます。
-- freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。件数が多い場合は `--start-billing-date` / `--end-billing-date` で月単位に絞ってください。
+- freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。上限に達すると終了コード 1 で終わり、取得済みの分も出力しません（ちょうど 10,000 件でも失敗します）。件数が多い場合は `--start-billing-date` / `--end-billing-date` で期間を絞ってください。
+- freee販売から作成された請求書を含める `sales_management_origin` には対応していません。
 - PDF の取得・請求書の送付は freee 請求書 API にないため、Web で行ってください。
 
 #### 作成（dry-run 既定）
@@ -142,7 +148,7 @@ freee invoices create --company-id 1234567 --plan ./plan.json
 freee invoices create --company-id 1234567 --plan ./plan.json --execute
 ```
 
-plan JSON は `POST /invoices` のボディから `company_id` を除いたもの（`company_id` と `partner_sending_method`、未知キーは拒否）。
+plan JSON は `POST /invoices` のボディのうち、CLI が対応する項目だけを書いたもの（許可する項目と値は [`src/domain/invoice-plan.ts`](./src/domain/invoice-plan.ts)）。`company_id` と `partner_sending_method`、未知キーは拒否する。API で定義されていても CLI が受け付けない項目・値がある（例: `payment_type` は `transfer` / `direct_debit` のみ）。
 
 ```json
 {
@@ -165,7 +171,7 @@ plan JSON は `POST /invoices` のボディから `company_id` を除いたも�
 
 #### 更新（dry-run 既定）
 
-plan は**部分パッチ**。GET で読んだ現在値から完全な body を組み立て、plan に書いた項目だけを上書きして PUT する。
+plan は**作成 plan の許可項目に限る部分パッチ**。GET で読んだ現在値から完全な body を組み立て、plan に書いた項目だけを上書きして PUT する。GET から引き継いで送る項目（`issue_date` や住所など）と、plan で変更できる項目は別で、前者を plan に書くと拒否される。
 省略した項目は現在値がそのまま送られるので、変えない項目を書き直す必要はない。`lines` は**配列ごと置換**（行単位のマージはしない）。
 
 ```bash
@@ -223,8 +229,9 @@ freee quotations get --company-id 1234567 --id 123 --format json
 freee quotations templates --company-id 1234567 --format table
 ```
 
-- `list` は `--quotation-number`、`--subject`、`--partner-ids 1,2,3`（最大3件）、`--sending-status sent|unsent`、`--cancel-status canceled|uncanceled`、`--start-expiration-date` / `--end-expiration-date`、`--sales-management-origin` で絞り込めます。
-- 請求書と同じく、`limit + offset` が 10,000 を超える手前で中断します。件数が多い場合は期間で絞ってください。
+- `list` は `--quotation-number`、`--subject`、`--partner-ids 1,2,3`（最大3件）、`--sending-status sent|unsent`、`--cancel-status canceled|uncanceled`、`--start-expiration-date` / `--end-expiration-date` で絞り込めます。
+- `--sales-management-origin` は絞り込みではなく、freee販売から作成された見積書**も含める**フラグです（既定では含めません。付けるには freee販売の帳票へのアクセス権限が必要です）。
+- 請求書と同じく、`limit + offset` が 10,000 を超える手前で終了コード 1 で中断し、取得済みの分も出力しません。件数が多い場合は期間で絞ってください。
 
 #### 作成（dry-run 既定）
 
@@ -236,7 +243,7 @@ freee quotations create --company-id 1234567 --plan ./quotation-plan.json
 freee quotations create --company-id 1234567 --plan ./quotation-plan.json --execute
 ```
 
-plan JSON は `POST /quotations` のボディから `company_id` を除いたものです（`company_id` と `partner_sending_method`、未知キーは拒否）。`quotation_date` は必須で、明細の書き方は請求書の plan と同じです。
+plan JSON は `POST /quotations` のボディから `company_id` を除いたものです（`company_id` と `partner_sending_method`、未知キーは拒否）。`quotation_date` は必須です（許可する項目は [`src/domain/quotation-plan.ts`](./src/domain/quotation-plan.ts)）。明細の数量・単価・税率の書き方は請求書と同じですが、請求書の明細で使える `sales_date` と `tag_ids` は見積書では使えません。
 
 ```json
 {
@@ -282,13 +289,13 @@ freee expense list --company-id 1234567 --start-transaction-date 2026-09-01 --en
 
 ## 1Password 管理の OAuth（初回認可後は refresh）
 
-通常の Public API コマンドは、1Password を token bundle の唯一の管理元として使用する。初回だけ `freee auth login --profile <name>` を実行し、表示されたローカルの `/start` をブラウザで開く。認可成功後、access token・single-use refresh token・期限は 1Password item の stdin template 更新で保存する。以後は同じ `--profile`（または `FREEE_OAUTH_PROFILE`）で item を選び、期限内は refresh せず、期限切れ時だけ refresh token を回転して保存完了後に API を呼ぶ。
+`FREEE_ACCESS_TOKEN` が設定されていない場合、通常の Public API コマンドは 1Password を token bundle の唯一の管理元として使用する。初回だけ `freee auth login --profile <name>` を実行し、表示されたローカルの `/start` をブラウザで開く。認可成功後、access token・single-use refresh token・期限は 1Password item の stdin template 更新で保存する。以後は同じ `--profile`（または `FREEE_OAUTH_PROFILE`）で item を選び、期限内は refresh せず、期限切れ時だけ refresh token を回転して保存完了後に API を呼ぶ。
 
 profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFILE>` として注入する（`<PROFILE>` は大文字、`-` は `_`）。profile 名は `^[a-z0-9][a-z0-9-]*$`（小文字・数字・ハイフン）に限る。大文字や `_` を許すと環境変数名が衝突し、別 profile の rotation が互いの item を上書きしうるため。
 
 **1Password の service account で実行する場合は `FREEE_OAUTH_VAULT_<PROFILE>` に vault 名も注入する。** service account では `op item get` / `op item edit` に vault の指定が必須で、無いと `a vault query must be provided when this command is called by a service account` で失敗する。個人アカウント（Touch ID）では省略してよい。対象 item は事前に `access_token`、`refresh_token`、`expires_at` の各 field を持たせる。token・secret・認可コードをファイル、ログ、標準出力、argv に置かない。**item 参照は `op` の argv に渡す**（値そのものではなく、どの item かを指す名前であり credential ではない）。ソース・テスト・fixture には埋め込まず、実行時に注入する。`op item edit` への token bundle は標準入力だけで渡す。refresh が無効な場合は自動でブラウザを開かず、`freee auth login --profile <name>` を明示的に実行して再認可する。
 
-従来の `~/.config/freee-mcp/tokens.json` は通常 CLI の token 管理元としては使用しない。`FREEE_ACCESS_TOKEN` は runtime OAuth の子プロセスに限る一時注入との後方互換経路であり、永続保存先ではない。
+従来の `~/.config/freee-mcp/tokens.json` は通常 CLI の token 管理元としては使用しない。`FREEE_ACCESS_TOKEN` は runtime OAuth が子プロセスへ token を渡す経路と、手元での一時的な利用のためのもので、永続保存先ではない。設定されていると `--profile` より優先される。
 
 ## credential を保存しない runtime OAuth（read-only export と invoices / quotations / partners write に共用）
 
@@ -298,6 +305,10 @@ plan v2 は CLI ルートからの引数配列を `commands` に含むJSONで、
 
 `invoices create` / `update` / `cancel` / `uncancel`、`quotations create` / `cancel` / `uncancel`、`partners create`、`partners update` は dry-run が既定だが、plan に `--execute` を含めると runtime OAuth 経由でも実際に API write をする。`invoices update --execute` / `cancel --execute` / `uncancel --execute` には `--expect-invoice-number` が、`quotations cancel --execute` / `uncancel --execute` には `--expect-quotation-number` が、`partners update --execute` には `--expect-name` が必須である。実行前に対象と plan 内容を確認すること。
 
+- 事前の検証は、plan の形・コマンド数・許可された先頭 2 要素までで、各コマンドのオプションや参照先の plan JSON の中身は実行時に検証される。
+- `commands` は**先頭から 1 つずつ実行し、失敗した時点で止まる**。先に成功した書き込みは取り消さず、途中から再開する機能もない。失敗したら各コマンドの結果を確かめ、実行済みの作成コマンドを含む plan を丸ごと再実行しない。
+- `commands` の中の相対パス（`--plan` / `--out` / `--log-dir`）は、runtime plan ファイルの場所ではなく**リポジトリのルートを基準**に解決される。リポジトリの外のファイルは絶対パスで書く。
+
 ```bash
 cat > plan.json <<'EOF'
 {"commands":[["companies","list"]]}
@@ -306,11 +317,11 @@ npm run runtime-oauth-exec -- --plan ./plan.json
 # listener起動後に http://127.0.0.1:54321/start をブラウザで開く
 ```
 
-認可後に `companies list` が事業所一覧を返れば疎通できている。請求書APIを使うplan（例: `invoices templates --company-id <company-id>`）で `/iv` が 401 または 403 になる場合は、アプリに請求書 API のscopeが付与されていない。その場合はアプリ設定のscopeを確認し、コードやtoken保存で回避しない。
+認可後に `companies list` が事業所一覧を返れば疎通できている。請求書APIを使うplan（例: `invoices templates --company-id <company-id>`）で `/iv` が 401 または 403 になる場合、アプリに請求書 API の scope が付与されていない可能性がある。401 は token の有効性、403 は scope・権限・対象サービスの利用条件・アクセス制限を切り分ける。コードや token 保存で回避しない。
 
 ## export（検証用データ取得・read-only）
 
-検証用の過去データ（証憑・仕訳など）をローカルに取得する。**この節の export サブコマンド（receipts / journals / wallet-txns / expense-applications）はすべて GET のみ（データ write なし）**。認証は上の「credential を保存しない runtime OAuth」を使い、既存 token file への fallback や refresh token の永続化を行わない（runtime plan 自体は invoices / quotations / partners の write も運べる。詳細はその節を参照）。
+検証用の過去データ（証憑・仕訳など）をローカルに取得する。**この節の export サブコマンド（receipts / journals / wallet-txns / expense-applications）はすべて GET のみ（データ write なし）**。以下の例のように `freee export …` を直接実行すると、ほかのコマンドと同じ認証（`FREEE_ACCESS_TOKEN`、なければ 1Password。必要なら refresh token を更新して保存する）を使う。token を保存せずに実行する場合は、引数を runtime plan の `commands` に入れて `runtime-oauth-exec` で実行する（例: `{"commands":[["export","journals","--company-id","1234567","--month","2026-02","--out","/absolute/path/to/out"]]}`）。
 
 ### 証憑（ファイルボックス）
 
@@ -324,7 +335,7 @@ freee export receipts \
 - `<out>/index.json` に証憑メタ一覧、`<out>/files/<id>.<ext>` に証憑ファイル本体を保存する。
 - 期間は `--month YYYY-MM`、または `--start-date` / `--end-date` で指定（`--month` と併用時は個別指定が優先）。
 - 一覧フィルタ（start_date/end_date）は freee 側ではアップロード日（created_at）基準。
-- freee の receipts は 1 ページ最大 100 件のため `limit=100` でページングする。個々の DL 失敗は記録して継続する。
+- この CLI は `limit=100` でページングする。個々の DL 失敗は記録して継続する。
 
 ### 仕訳一覧（仕訳帳）
 
@@ -336,8 +347,9 @@ freee export journals \
 ```
 
 - 非同期エクスポート（要求 → status ポーリング → download）を内部で処理し、`<out>/journals-<start>_<end>.<ext>` に保存する。
-- `--download-type` は `generic_v2`（既定・UTF-8 の整形済み汎用 CSV・98 列）/ `generic` / `csv` / `pdf`。
-- `--encoding`（既定 `utf-8`）は **`generic` / `generic_v2` でのみ有効**。`csv` / `pdf` は freee 仕様で固定（sjis）のため付与すると 400 になる。
+- `--download-type` は `generic_v2`（既定・freee 汎用形式の新 CSV）/ `generic`（旧 CSV）/ `csv`（弥生会計形式）/ `pdf`。列の構成は取得したファイルのヘッダーを参照する。
+- `--encoding`（既定 `utf-8`）は **`generic` / `generic_v2` でだけ API へ送る**。`csv` / `pdf` では指定しても無視する（API に `encoding` を送ると 400 になるため）。
+- **Shift_JIS のファイルは文字化けして保存される。** 現在の実装は PDF 以外を文字列として保存するため、`--encoding sjis` と、常に Shift_JIS で返る `--download-type csv` は使わないこと。保存後に文字コードを変換しても元には戻らない。CSV は `generic_v2` か `generic` を `utf-8` で取得する。
 
 ### カード・ウォレット明細
 
