@@ -99,13 +99,9 @@ export async function runExportJournals(
   const ext = extensionForDownloadType(opts.downloadType);
   const outputPath = `${opts.outDir}/journals-${opts.startDate}_${opts.endDate}.${ext}`;
 
-  if (opts.downloadType === "pdf") {
-    const buffer = Buffer.from(await downloadRes.arrayBuffer());
-    await deps.writeFile(outputPath, buffer);
-  } else {
-    const text = await downloadRes.text();
-    await deps.writeFile(outputPath, text);
-  }
+  // 文字コードを解釈せずにバイト列のまま保存する。text() は UTF-8 として読むため、
+  // Shift_JIS の CSV（csv 形式と encoding=sjis）が壊れる。
+  await deps.writeFile(outputPath, Buffer.from(await downloadRes.arrayBuffer()));
 
   return { id, status, outputPath, downloadType: opts.downloadType };
 }

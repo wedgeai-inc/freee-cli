@@ -358,7 +358,7 @@ freee export journals \
 - 非同期エクスポート（要求 → status ポーリング → download）を内部で処理し、`<out>/journals-<start>_<end>.<ext>` に保存する。
 - `--download-type` は `generic_v2`（既定・freee 汎用形式の新 CSV）/ `generic`（旧 CSV）/ `csv`（弥生会計形式）/ `pdf`。列の構成は取得したファイルのヘッダーを参照する。
 - `--encoding`（既定 `utf-8`）は **`generic` / `generic_v2` でだけ API へ送る**。`csv` / `pdf` では指定しても無視する（API に `encoding` を送ると 400 になるため）。
-- **Shift_JIS のファイルは文字化けして保存される。** 現在の実装は PDF 以外を文字列として保存するため、`--encoding sjis` と、常に Shift_JIS で返る `--download-type csv` は使わないこと。保存後に文字コードを変換しても元には戻らない。CSV は `generic_v2` か `generic` を `utf-8` で取得する。
+- ダウンロードしたファイルは文字コードを変換せず、受け取ったバイト列のまま保存する。`--encoding sjis` を指定したときや `--download-type csv` のときは、freee が返した文字コード（Shift_JIS など）のファイルになる。
 
 ### カード・ウォレット明細
 

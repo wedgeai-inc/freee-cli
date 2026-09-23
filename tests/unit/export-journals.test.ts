@@ -71,6 +71,28 @@ describe("runExportJournals", () => {
     expect(String(fetchMock.mock.calls[3]?.[0])).toContain("/api/1/journals/reports/555/download");
   });
 
+  it.each([
+    { downloadType: "csv", encoding: "utf-8" },
+    { downloadType: "generic_v2", encoding: "sjis" },
+  ])("saves the downloaded bytes unchanged for $downloadType / $encoding (Shift_JIS)", async ({ downloadType, encoding }) => {
+    // 「発生日,借方」を Shift_JIS で表したバイト列。文字列として読むと壊れる
+    const sjis = Buffer.from([0x94, 0xad, 0x90, 0xb6, 0x93, 0xfa, 0x2c, 0x8e, 0xd8, 0x95, 0xfb]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes({ journals: { id: 7 } }))
+      .mockResolvedValueOnce(jsonRes({ journals: { id: 7, status: "uploaded" } }))
+      .mockResolvedValueOnce(new Response(sjis, { status: 200, headers: { "content-type": "text/csv" } }));
+    const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "t", fetchFn: fetchMock });
+    const writes: Array<string | Buffer> = [];
+    await runExportJournals(
+      { companyId: 1, startDate: "2026-02-01", endDate: "2026-02-28", outDir: "/out", downloadType, encoding },
+      { client, ensureDir: async () => {}, writeFile: async (_p, d) => { writes.push(d); }, sleep: async () => {} },
+    );
+    expect(writes.length).toBe(1);
+    expect(Buffer.isBuffer(writes[0])).toBe(true);
+    expect(Buffer.compare(writes[0] as Buffer, sjis)).toBe(0);
+  });
+
   it("throws when export status becomes failed", async () => {
     const fetchMock = vi
       .fn()
