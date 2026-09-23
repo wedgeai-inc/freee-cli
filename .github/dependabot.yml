@@ -44,6 +44,12 @@ updates:
           - "*"
         update-types:
           - "major"
+    # The runtime (CI and engines) is Node 22, so do not raise type
+    # definitions to a major newer than the runtime.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     commit-message:
       prefix: "chore"
       include: "scope"

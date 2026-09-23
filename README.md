@@ -13,7 +13,7 @@
 
 ## 必要なもの
 
-- Node.js 22 以上
+- Node.js 22.12 以上
 - freee アプリストアで作成したアプリ（Client ID / Client Secret）
 - token の保管に 1Password CLI（`op`）を使う場合は、その CLI
 
