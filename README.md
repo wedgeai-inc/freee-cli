@@ -42,6 +42,8 @@ freee() {
 }
 ```
 
+この設定をシェルの起動ファイル（`~/.zshrc` など）に書く場合は、`$(pwd -P)` の部分をリポジトリの絶対パスに置き換えてください。起動ファイルが読まれるときのディレクトリで解決されてしまうためです。
+
 ## 認証
 
 freee アプリストアでアプリを作成し、コールバック URL に `http://127.0.0.1:54321/callback` を登録してください。実行時には `FREEE_CLIENT_ID` と `FREEE_CLIENT_SECRET` を環境変数で渡します。値はファイルに保存せず、実行のたびにパスワードマネージャなどから注入してください。
@@ -178,7 +180,7 @@ plan JSON は `POST /invoices` のボディのうち、CLI が対応する項目
 
 #### 更新（dry-run 既定）
 
-plan は**作成 plan の許可項目に限る部分パッチ**。GET で読んだ現在値から完全な body を組み立て、plan に書いた項目だけを上書きして PUT する。GET から引き継いで送る項目（`issue_date` や住所など）と、plan で変更できる項目は別で、前者を plan に書くと拒否される。
+plan は**作成 plan の許可項目に限る部分パッチ**。GET で読んだ現在値から完全な body を組み立て、plan に書いた項目だけを上書きして PUT する。GET から引き継いで送る項目のうち、plan の許可項目にないもの（`issue_date` や住所など）は plan に書くと拒否される。
 省略した項目は現在値がそのまま送られるので、変えない項目を書き直す必要はない。`lines` は**配列ごと置換**（行単位のマージはしない）。
 
 plan で変えない現在値も、送る前に同じ制約で検証する。部署名・担当者名・住所の建物名などが空文字で返る請求書では、別の項目だけの更新でも PUT 前に `invalid response` で停止することがある。これらは plan で変更できない項目なので、plan に足したりダミー値を入れたりせず、必要な変更は freee Web で行う。
@@ -310,7 +312,7 @@ profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFIL
 
 `FREEE_CLIENT_ID`と`FREEE_CLIENT_SECRET`をruntime注入し、ローカルの`/start`をブラウザで開く。callbackの認可コードをメモリ上でtokenへ交換し、Access Tokenを検証済みのCLI runtime plan にだけ渡す。token、code、secret、stateはファイルや標準出力へ保存しない。
 
-plan v2 は CLI ルートからの引数配列を `commands` に含むJSONで、最大500コマンドまで受け付ける。許可される先頭2要素は `export journals` / `export receipts` / `export wallet-txns` / `export expense-applications`、`companies list`、`partners search` / `create` / `get` / `update`、`invoices list` / `get` / `templates` / `create` / `update` / `cancel` / `uncancel`、`quotations list` / `get` / `templates` / `create` / `cancel` / `uncancel` のみである。旧形式の `journals` などの export subcommand は `export journals` に正規化して互換実行する。任意のshell・実行ファイル・`expense` / `auth` 等の未許可コマンドは拒否する。
+plan v2 は CLI ルートからの引数配列を `commands` に含むJSONで、最大500コマンド・1 コマンドあたり引数 64 個まで受け付ける（旧形式を正規化したあとの数で数える）。許可される先頭2要素は `export journals` / `export receipts` / `export wallet-txns` / `export expense-applications`、`companies list`、`partners search` / `create` / `get` / `update`、`invoices list` / `get` / `templates` / `create` / `update` / `cancel` / `uncancel`、`quotations list` / `get` / `templates` / `create` / `cancel` / `uncancel` のみである。旧形式の `journals` などの export subcommand は `export journals` に正規化して互換実行する。任意のshell・実行ファイル・`expense` / `auth` 等の未許可コマンドは拒否する。
 
 `invoices create` / `update` / `cancel` / `uncancel`、`quotations create` / `cancel` / `uncancel`、`partners create`、`partners update` は dry-run が既定だが、plan に `--execute` を含めると runtime OAuth 経由でも実際に API write をする。`invoices update --execute` / `cancel --execute` / `uncancel --execute` には `--expect-invoice-number` が、`quotations cancel --execute` / `uncancel --execute` には `--expect-quotation-number` が、`partners update --execute` には `--expect-name` が必須である。実行前に対象と plan 内容を確認すること。
 
@@ -358,7 +360,7 @@ freee export journals \
 - 非同期エクスポート（要求 → status ポーリング → download）を内部で処理し、`<out>/journals-<start>_<end>.<ext>` に保存する。
 - `--download-type` は `generic_v2`（既定・freee 汎用形式の新 CSV）/ `generic`（旧 CSV）/ `csv`（弥生会計形式）/ `pdf`。列の構成は取得したファイルのヘッダーを参照する。
 - `--encoding`（既定 `utf-8`）は **`generic` / `generic_v2` でだけ API へ送る**。`csv` / `pdf` では指定しても無視する（API に `encoding` を送ると 400 になるため）。
-- ダウンロードしたファイルは文字コードを変換せず、受け取ったバイト列のまま保存する。`--encoding sjis` を指定したときや `--download-type csv` のときは、freee が返した文字コード（Shift_JIS など）のファイルになる。
+- ダウンロードしたファイルは文字コードを変換せず、受け取ったバイト列のまま（BOM が付いていれば BOM も含めて）保存する。`--encoding sjis` を指定したときや `--download-type csv` のときは、freee が返した文字コード（Shift_JIS など）のファイルになる。
 
 ### カード・ウォレット明細
 

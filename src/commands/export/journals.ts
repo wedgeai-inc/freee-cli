@@ -44,7 +44,7 @@ function extensionForDownloadType(downloadType: string): string {
  * 2) GET /api/1/journals/reports/{id}/status を uploaded までポーリング
  * 3) GET /api/1/journals/reports/{id}/download でファイル取得・保存
  *
- * encoding=utf-8 を既定にすることで UTF-8 環境での文字化けを避ける。
+ * encoding の既定は utf-8。ダウンロード結果は文字コードを変換せず、バイト列のまま保存する。
  */
 export async function runExportJournals(
   opts: ExportJournalsOptions,
