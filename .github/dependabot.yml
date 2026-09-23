@@ -1,3 +1,7 @@
+# Labels are omitted on purpose. A label listed here is ignored when the
+# repository does not already have it, and Dependabot does not create it.
+# Omitting labels lets Dependabot create its defaults (dependencies and the
+# ecosystem label) and apply them.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -14,9 +18,6 @@ updates:
       github-actions:
         patterns:
           - "*"
-    labels:
-      - "dependencies"
-      - "github-actions"
     commit-message:
       prefix: "chore"
       include: "scope"
@@ -37,8 +38,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
-    labels:
-      - "dependencies"
+      # Keep breaking updates in one pull request per ecosystem, separate from minor and patch.
+      major:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
     commit-message:
       prefix: "chore"
       include: "scope"
