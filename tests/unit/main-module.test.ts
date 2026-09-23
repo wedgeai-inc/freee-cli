@@ -27,6 +27,13 @@ describe("isMainModule", () => {
     expect(isMainModule(pathToFileURL(real).href, link, { realpath })).toBe(true);
   });
 
+  it("matches the link path itself when the module URL keeps the symlink (--preserve-symlinks-main)", () => {
+    const link = "/usr/local/bin/freee";
+    const real = "/opt/freee-cli/dist/src/cli.js";
+    const realpath = (p: string) => (p === link ? real : p);
+    expect(isMainModule(pathToFileURL(link).href, link, { realpath })).toBe(true);
+  });
+
   it("falls back to the given path when it cannot be resolved", () => {
     const path = "/tmp/missing/cli.js";
     const realpath = () => {
@@ -62,10 +69,11 @@ describe("built CLI in a directory with URL-encoded characters", () => {
     expect(out).toContain("Usage: freee");
   });
 
-  it("prints help when started through a symlink", () => {
-    const link = join(dir, "freee");
+  it.each([[], ["--preserve-symlinks-main"]])("prints help when started through a symlink (node flags: %j)", (...flags: string[]) => {
+    // --preserve-symlinks-main では相対 import がリンクの場所から解決されるため、cli.js と同じ階層に置く
+    const link = join(dir, "dist", "src", `freee-link-${flags.length}.js`);
     symlinkSync(join(dir, "dist", "src", "cli.js"), link);
-    const out = execFileSync(process.execPath, [link, "--help"], { encoding: "utf-8" });
+    const out = execFileSync(process.execPath, [...flags, link, "--help"], { encoding: "utf-8" });
     expect(out).toContain("Usage: freee");
   });
 });
