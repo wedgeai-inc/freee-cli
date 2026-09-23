@@ -8,7 +8,7 @@
 
 - **書き込みは dry-run が既定です。** 請求書・見積書・取引先を変更するコマンドは、`--execute` を付けたときだけ API へ書き込みます。
 - **対象の取り違えを防ぎます。** 取消・復元・更新の実行時には、請求書番号・見積書番号・取引先名の完全一致を要求します。
-- **書き込みの記録を残します。** 実行結果を `./audit-logs/` に JSONL で保存します。メールアドレス・氏名・Authorization ヘッダーなど既知の項目名の値に加え、自由記述の中でもメールアドレスの形に一致する部分はマスクします。ただし個人情報を網羅的に検出するものではなく、件名・摘要や請求書・見積書の `partner_display_name` などはそのまま残ります。記録ファイルの扱いに注意してください。
+- **書き込みの記録を残します。** 実行結果を `./audit-logs/` に JSONL で保存します。メールアドレス・氏名・Authorization ヘッダーなど既知の項目名の値に加え、自由記述の中でもメールアドレスの形に一致する部分はマスクします。ただし個人情報を網羅的に検出するものではなく、件名・摘要や、請求書・見積書を作成したときの `partner_display_name` などはそのまま残ります（請求書の更新では `partner_display_name` や住所・担当者名もマスクします）。記録ファイルの扱いに注意してください。
 - **token をファイルに平文で保存しません。** 認証情報は 1Password に保管するか、実行時にだけメモリ上で扱います。
 
 > **エラー終了は「書き込まれていない」ことを意味しません。** 書き込み系コマンドは API へ送ってから読み戻し・記録保存をするため、送信後の結果不明・読み戻し失敗・記録保存の失敗でもエラー終了し、記録が `failed` になったり残らなかったりします。エラー終了したら、freee Web や `get` / `list` で対象を確かめるまで再実行しないでください。
@@ -28,6 +28,8 @@ npm ci
 npm run build
 node dist/src/cli.js --help
 ```
+
+`--help` でヘルプ本文が表示されることを確かめてください。**リポジトリまでの絶対パスに空白・日本語・`#` など URL エンコードされる文字が含まれると、CLI は何もせず終了コード 0 で終わります**（パスを引用符で囲んでも回避できません）。runtime OAuth の plan もこの状態では各コマンドを実行しないまま成功扱いになるため、こうした文字を含まない場所に clone してください。
 
 以降の例は `freee` コマンドで書いています。次のように alias を設定するか、`freee` を `node dist/src/cli.js` に読み替えてください。
 
@@ -174,6 +176,8 @@ plan JSON は `POST /invoices` のボディのうち、CLI が対応する項目
 plan は**作成 plan の許可項目に限る部分パッチ**。GET で読んだ現在値から完全な body を組み立て、plan に書いた項目だけを上書きして PUT する。GET から引き継いで送る項目（`issue_date` や住所など）と、plan で変更できる項目は別で、前者を plan に書くと拒否される。
 省略した項目は現在値がそのまま送られるので、変えない項目を書き直す必要はない。`lines` は**配列ごと置換**（行単位のマージはしない）。
 
+plan で変えない現在値も、送る前に同じ制約で検証する。部署名・担当者名・住所の建物名などが空文字で返る請求書では、別の項目だけの更新でも PUT 前に `invalid response` で停止することがある。これらは plan で変更できない項目なので、plan に足したりダミー値を入れたりせず、必要な変更は freee Web で行う。
+
 ```bash
 # dry-run（既定）: 現在値との差分・参考金額・送る body を出す
 freee invoices update --company-id 1234567 --id 123 --plan ./patch.json
@@ -243,7 +247,7 @@ freee quotations create --company-id 1234567 --plan ./quotation-plan.json
 freee quotations create --company-id 1234567 --plan ./quotation-plan.json --execute
 ```
 
-plan JSON は `POST /quotations` のボディから `company_id` を除いたものです（`company_id` と `partner_sending_method`、未知キーは拒否）。`quotation_date` は必須です（許可する項目は [`src/domain/quotation-plan.ts`](./src/domain/quotation-plan.ts)）。明細の数量・単価・税率の書き方は請求書と同じですが、請求書の明細で使える `sales_date` と `tag_ids` は見積書では使えません。
+plan JSON は `POST /quotations` のボディのうち、CLI が対応する項目だけを書いたものです（`company_id` と `partner_sending_method`、未知キーは拒否）。API で定義されていても、`partner_address_zipcode` などの住所項目は受け付けません。`quotation_date` は必須です（許可する項目は [`src/domain/quotation-plan.ts`](./src/domain/quotation-plan.ts)）。明細の数量・単価・税率の書き方は請求書と同じですが、請求書の明細で使える `sales_date` と `tag_ids` は見積書では使えません。
 
 ```json
 {
