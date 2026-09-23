@@ -10,7 +10,7 @@ npm run typecheck
 npm test
 ```
 
-Node.js 22 以上が必要です。
+Node.js 22.12 以上が必要です。
 
 ## 方針
 

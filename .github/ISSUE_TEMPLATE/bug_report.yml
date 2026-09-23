@@ -67,7 +67,7 @@ body:
     id: runtime
     attributes:
       label: Node.js version
-      description: Output of `node --version`. Node.js 22 or newer is required.
+      description: Output of `node --version`. Node.js 22.12 or newer is required.
       placeholder: "v22.0.0"
     validations:
       required: false

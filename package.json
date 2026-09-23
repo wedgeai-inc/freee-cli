@@ -6,7 +6,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "bin": {
     "freee": "dist/src/cli.js"
@@ -18,12 +18,12 @@
     "runtime-oauth-exec": "tsx src/commands/auth/runtime-oauth-exec.ts"
   },
   "dependencies": {
-    "commander": "^12.1.0"
+    "commander": "^15.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",
-    "typescript": "^5.8.3",
-    "tsx": "^4.20.6",
-    "vitest": "^3.2.4"
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }
