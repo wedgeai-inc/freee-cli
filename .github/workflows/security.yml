@@ -42,4 +42,9 @@ jobs:
 
       - name: Run gitleaks
         run: |
+          # git repo でない場所では gitleaks が exit 0 で "no leaks found" になり、検査が空回りする。
+          if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            echo "gitleaks: refusing to scan because this is not a git repository" >&2
+            exit 1
+          fi
           "$RUNNER_TEMP/gitleaks" git --redact --verbose --exit-code 1 .
