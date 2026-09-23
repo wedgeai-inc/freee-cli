@@ -48,28 +48,79 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 
 以下の例の `--company-id 1234567` は、ご自身の事業所 ID に置き換えてください。事業所 ID は `freee companies list` で確認できます。
 
-### 見積書
+| コマンド | 種別 |
+|---|---|
+| `auth login` | 1Password に token を保存する初回認可 |
+| `companies list` | 読み取り |
+| `partners search` / `get` | 読み取り |
+| `partners create` / `update` | 書き込み（dry-run 既定） |
+| `invoices list` / `get` / `templates` | 読み取り |
+| `invoices create` / `update` / `cancel` / `uncancel` | 書き込み（dry-run 既定） |
+| `quotations list` / `get` / `templates` | 読み取り |
+| `quotations create` / `cancel` / `uncancel` | 書き込み（dry-run 既定） |
+| `expense list` | 読み取り |
+| `export receipts` / `journals` / `wallet-txns` / `expense-applications` | 読み取り（ローカルへ保存） |
 
-`freee quotations list|get|templates` は読み取り専用です。`freee quotations create` と
-`freee quotations cancel` / `uncancel` は dry-run が既定で、実行にはそれぞれ `--execute`、取消・復元には
-`--expect-quotation-number` の完全一致も必要です。
+共通のオプション:
 
+- `--format json|table`: 読み取り系の出力形式（既定 `json`。`export` と `partners get` は JSON 固定）
+- `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）
+- `--task-id <id>`: audit log に記録する task ID
+- `--profile <name>`: 1Password 管理の OAuth で使う profile（`FREEE_OAUTH_PROFILE` でも指定可）
 
-### 1) 事業所一覧（Public API / read-only）
+### 事業所
 
 ```bash
-freee companies list --format=table
+freee companies list --format table
 ```
 
-### 2) 取引先検索（Public API / read-only）
+### 取引先
+
+#### 検索
 
 ```bash
-freee partners search \
-  --company-id=1234567 \
-  --keyword="取引先名" \
-  --format=table
+freee partners search --company-id 1234567 --keyword "取引先名" --format table
 ```
-### 3) 請求書（read-only）
+
+#### 作成（dry-run 既定）
+
+```bash
+# dry-run: plan を検証して監査記録を残すが、POST はしない
+freee partners create --company-id 1234567 --plan ./partner-plan.json
+
+# execute: POST → 読み戻し照合 → audit log
+freee partners create --company-id 1234567 --plan ./partner-plan.json --execute
+```
+
+plan は `POST /api/1/partners` の body から `company_id` を除いた JSON です。body を `partner` でラップしません。
+
+```json
+{"name":"株式会社サンプル","code":"sample","default_title":"御中","country_code":"JP"}
+```
+
+- `name` は空・空白のみを拒否します。`code` は255文字以内かつ空・空白のみを拒否します。`default_title` は `"御中"` / `"様"` / `""` のみです（いずれも CLI 固有の制限）。
+- `shortcut1` / `shortcut2` / `long_name` / `name_kana` / `contact_name` / `email` / `phone` / `zipcode` / `street_name1` / `street_name2` は空文字列を許します。
+- コマンド自身は POST 後に再試行しません。`unknown` で終了した場合、プロセスをまたぐ重複は自動判定できないため、再実行前に `partners search` で作成済みか確認してください。
+
+#### 取得・更新（dry-run 既定）
+
+```bash
+freee partners get --company-id 1234567 --id 100
+freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json
+freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json --expect-name "株式会社サンプル" --execute
+```
+
+`get` は API 応答の `partner` を JSON で返します。`update` は GET した変更対象との差分を dry-run で表示します。`--execute` では `--expect-name` が必須で、現在名が完全一致した場合だけ PUT します。plan の `name` は任意で、省略時は現在名を送ります。`code` は update plan では受け付けません。`available` と、3項目すべてを持つか `null` の期日設定を更新できます。`org_code`、`invoice_registration_number`、`partner_doc_setting_attributes.sending_method` は update plan で `null` を受け付けず、CLI から未設定へ戻せません（API 一次情報の記述が衝突しているため、保守的に拒否します）。
+
+```json
+{"available":false,"address_attributes":{"zipcode":"1000001"}}
+```
+
+- PUT 後に読み戻しを行います。結果不明で終了した場合は、再実行せず freee Web で対象を確認してください。
+
+### 請求書
+
+#### 一覧・取得・テンプレート
 
 ```bash
 freee invoices list --company-id 1234567 --start-billing-date 2026-09-01 --end-billing-date 2026-09-30 --format table
@@ -81,7 +132,7 @@ freee invoices templates --company-id 1234567 --format table
 - freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。件数が多い場合は `--start-billing-date` / `--end-billing-date` で月単位に絞ってください。
 - PDF の取得・請求書の送付は freee 請求書 API にないため、Web で行ってください。
 
-### 4) 請求書ドラフト作成（write・dry-run 既定）
+#### 作成（dry-run 既定）
 
 ```bash
 # dry-run（既定）: plan を検証し、参考金額と送信予定 payload を表示。実 POST しない
@@ -112,7 +163,7 @@ plan JSON は `POST /invoices` のボディから `company_id` を除いたも�
 - 1 回の実行で作成する請求書は 1 件のみ。送付（メール・郵送）は行わない
 - dry-run の金額は参考値。確定値は `--execute` 後に読み戻した freee の応答を正とする
 
-### 5) 請求書の更新
+#### 更新（dry-run 既定）
 
 plan は**部分パッチ**。GET で読んだ現在値から完全な body を組み立て、plan に書いた項目だけを上書きして PUT する。
 省略した項目は現在値がそのまま送られるので、変えない項目を書き直す必要はない。`lines` は**配列ごと置換**（行単位のマージはしない）。
@@ -133,7 +184,7 @@ freee invoices update --company-id 1234567 --id 123 --plan ./patch.json --expect
 - GET 応答に未知のキーが現れたら PUT せずに停止する（`unmapped_response_key:<key>`）
 - GET と PUT の間の競合更新は検出できない。API に version / ETag による条件付き更新が無いため、更新直前の対象確認と更新後の freee Web 確認が必要。
 
-### 6) 請求書の取消
+#### 取消（dry-run 既定）
 
 ```bash
 # dry-run（既定）: 対象の請求書番号・金額・取引先 ID・取引状態を GET して audit に planned を残す
@@ -148,7 +199,7 @@ freee invoices cancel --company-id 1234567 --id 123 --expect-invoice-number INV-
 
 `--execute` には `--expect-invoice-number` が必須です。取消すると紐づく取引も削除されるため、`deal_status: registered` の対象では `--allow-deal-deletion` も必要です。audit log は `./audit-logs/freee-invoice-cancel-<date>.jsonl` に残ります。
 
-### 7) 請求書の復元
+#### 復元（dry-run 既定）
 
 ```bash
 # dry-run: 取消済みか確認して audit に planned を残す
@@ -162,50 +213,72 @@ freee invoices uncancel --company-id 1234567 --id 123 --expect-invoice-number IN
 
 取消時に削除された紐づく取引が復元で戻るかは確認していません。
 
-### 8) 見積書の復元
+### 見積書
+
+#### 一覧・取得・テンプレート
 
 ```bash
+freee quotations list --company-id 1234567 --start-quotation-date 2026-09-01 --end-quotation-date 2026-09-30 --format table
+freee quotations get --company-id 1234567 --id 123 --format json
+freee quotations templates --company-id 1234567 --format table
+```
+
+- `list` は `--quotation-number`、`--subject`、`--partner-ids 1,2,3`（最大3件）、`--sending-status sent|unsent`、`--cancel-status canceled|uncanceled`、`--start-expiration-date` / `--end-expiration-date`、`--sales-management-origin` で絞り込めます。
+- 請求書と同じく、`limit + offset` が 10,000 を超える手前で中断します。件数が多い場合は期間で絞ってください。
+
+#### 作成（dry-run 既定）
+
+```bash
+# dry-run（既定）: plan を検証し、参考金額と送信予定 payload を表示。実 POST しない
+freee quotations create --company-id 1234567 --plan ./quotation-plan.json
+
+# execute: 実 POST → 読み戻し → audit log（./audit-logs/freee-quotation-create-<date>.jsonl）
+freee quotations create --company-id 1234567 --plan ./quotation-plan.json --execute
+```
+
+plan JSON は `POST /quotations` のボディから `company_id` を除いたものです（`company_id` と `partner_sending_method`、未知キーは拒否）。`quotation_date` は必須で、明細の書き方は請求書の plan と同じです。
+
+```json
+{
+  "quotation_date": "2026-09-05",
+  "expiration_date": "2026-10-05",
+  "partner_id": 123,
+  "partner_title": "御中",
+  "subject": "開発支援のお見積り",
+  "tax_entry_method": "out",
+  "tax_fraction": "omit",
+  "withholding_tax_entry_method": "out",
+  "lines": [
+    { "description": "開発支援", "quantity": 40, "unit": "時間", "unit_price": "10000", "tax_rate": 10 }
+  ]
+}
+```
+
+- 1 回の実行で作成する見積書は 1 件のみ。送付は行いません
+- 見積書番号の採番設定は API から読めないため、dry-run では `quotation_number` の要否を検証しません
+
+#### 取消・復元（dry-run 既定）
+
+```bash
+# 取消
+freee quotations cancel --company-id 1234567 --id 123
+freee quotations cancel --company-id 1234567 --id 123 --expect-quotation-number Q-123 --execute
+
+# 復元（取消済みの見積書だけが対象）
 freee quotations uncancel --company-id 1234567 --id 123
 freee quotations uncancel --company-id 1234567 --id 123 --expect-quotation-number Q-123 --execute
 ```
 
-`--execute` には `--expect-quotation-number` が必須です。取消時に削除された紐づく取引が復元で戻るかは確認していません。
+`--execute` には `--expect-quotation-number` の完全一致が必須です。結果が不明で終了した場合は、再実行せず freee Web で対象を確認してください。audit log は `./audit-logs/freee-quotation-cancel-<date>.jsonl` / `freee-quotation-uncancel-<date>.jsonl` に残ります。
 
-### 9) 取引先作成（write・dry-run 既定）
-
-```bash
-# dry-run: plan を検証して監査記録を残すが、POST はしない
-freee partners create --company-id 1234567 --plan ./partner-plan.json
-
-# execute: POST → 読み戻し照合 → audit log
-freee partners create --company-id 1234567 --plan ./partner-plan.json --execute
-```
-
-plan は `POST /api/1/partners` の body から `company_id` を除いた JSON です。body を `partner` でラップしません。
-
-```json
-{"name":"株式会社サンプル","code":"sample","default_title":"御中","country_code":"JP"}
-```
-
-- `name` は空・空白のみを拒否します。`code` は255文字以内かつ空・空白のみを拒否します。`default_title` は `"御中"` / `"様"` / `""` のみです（いずれも CLI 固有の制限）。
-- `shortcut1` / `shortcut2` / `long_name` / `name_kana` / `contact_name` / `email` / `phone` / `zipcode` / `street_name1` / `street_name2` は空文字列を許します。
-- コマンド自身は POST 後に再試行しません。`unknown` で終了した場合、プロセスをまたぐ重複は自動判定できないため、再実行前に `partners search` で作成済みか確認してください。
-
-### 10) 取引先の取得・更新
+### 経費申請の一覧
 
 ```bash
-freee partners get --company-id 1234567 --id 100
-freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json
-freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json --expect-name "株式会社サンプル" --execute
+freee expense list --company-id 1234567 --start-transaction-date 2026-09-01 --end-transaction-date 2026-09-30 --format table
 ```
 
-`get` は API 応答の `partner` を JSON で返します。`update` は GET した変更対象との差分を dry-run で表示します。`--execute` では `--expect-name` が必須で、現在名が完全一致した場合だけ PUT します。plan の `name` は任意で、省略時は現在名を送ります。`code` は update plan では受け付けません。`available` と、3項目すべてを持つか `null` の期日設定を更新できます。`org_code`、`invoice_registration_number`、`partner_doc_setting_attributes.sending_method` は update plan で `null` を受け付けず、CLI から未設定へ戻せません（API 一次情報の記述が衝突しているため、保守的に拒否します）。
-
-```json
-{"available":false,"address_attributes":{"zipcode":"1000001"}}
-```
-
-- PUT 後に読み戻しを行います。結果不明で終了した場合は、再実行せず freee Web で対象を確認してください。
+- `--status`（例: `approved`）で絞り込めます。読み取りのみで、承認・取引登録は行いません。
+- runtime OAuth の plan では実行できません（下の「credential を保存しない runtime OAuth」の許可リストに含まれないため）。添付ファイルまで保存する場合は `export expense-applications` を使ってください。
 
 ## 1Password 管理の OAuth（初回認可後は refresh）
 
@@ -217,7 +290,7 @@ profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFIL
 
 従来の `~/.config/freee-mcp/tokens.json` は通常 CLI の token 管理元としては使用しない。`FREEE_ACCESS_TOKEN` は runtime OAuth の子プロセスに限る一時注入との後方互換経路であり、永続保存先ではない。
 
-## credential を保存しない runtime OAuth（read-only export と invoices / partners write に共用）
+## credential を保存しない runtime OAuth（read-only export と invoices / quotations / partners write に共用）
 
 `FREEE_CLIENT_ID`と`FREEE_CLIENT_SECRET`をruntime注入し、ローカルの`/start`をブラウザで開く。callbackの認可コードをメモリ上でtokenへ交換し、Access Tokenを検証済みのCLI runtime plan にだけ渡す。token、code、secret、stateはファイルや標準出力へ保存しない。
 
@@ -237,12 +310,12 @@ npm run runtime-oauth-exec -- --plan ./plan.json
 
 ## export（検証用データ取得・read-only）
 
-検証用の過去データ（証憑・仕訳など）をローカルに取得する。**この節の export サブコマンド（receipts / journals / wallet-txns / expense-applications）はすべて GET のみ（データ write なし）**。認証は上の「credential を保存しない runtime OAuth」を使い、既存 token file への fallback や refresh token の永続化を行わない（runtime plan 自体は invoices create の write も運べる。詳細はその節を参照）。
+検証用の過去データ（証憑・仕訳など）をローカルに取得する。**この節の export サブコマンド（receipts / journals / wallet-txns / expense-applications）はすべて GET のみ（データ write なし）**。認証は上の「credential を保存しない runtime OAuth」を使い、既存 token file への fallback や refresh token の永続化を行わない（runtime plan 自体は invoices / quotations / partners の write も運べる。詳細はその節を参照）。
 
 ### 証憑（ファイルボックス）
 
 ```bash
-node dist/src/cli.js export receipts \
+freee export receipts \
   --company-id 1234567 \
   --month 2026-02 \
   --out ./tmp/freee-validation/2026-02/receipts
@@ -256,7 +329,7 @@ node dist/src/cli.js export receipts \
 ### 仕訳一覧（仕訳帳）
 
 ```bash
-node dist/src/cli.js export journals \
+freee export journals \
   --company-id 1234567 \
   --month 2026-02 \
   --out ./tmp/freee-validation/2026-02
@@ -269,7 +342,7 @@ node dist/src/cli.js export journals \
 ### カード・ウォレット明細
 
 ```bash
-node dist/src/cli.js export wallet-txns \
+freee export wallet-txns \
   --company-id 1234567 \
   --month 2026-02 \
   --walletable-type wallet \
@@ -285,7 +358,7 @@ node dist/src/cli.js export wallet-txns \
 ### 経費精算申請
 
 ```bash
-node dist/src/cli.js export expense-applications \
+freee export expense-applications \
   --company-id 1234567 \
   --month 2026-02 \
   --out ./tmp/freee-validation/2026-02/expense-reports
