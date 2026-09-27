@@ -69,7 +69,10 @@ describe("built CLI in a directory with URL-encoded characters", () => {
     expect(out).toContain("Usage: freee");
   });
 
-  it.each([[], ["--preserve-symlinks-main"]])("prints help when started through a symlink (node flags: %j)", (...flags: string[]) => {
+  it.each([
+    { label: "none", flags: [] as string[] },
+    { label: "--preserve-symlinks-main", flags: ["--preserve-symlinks-main"] },
+  ])("prints help when started through a symlink (node flags: $label)", ({ flags }) => {
     // --preserve-symlinks-main では相対 import がリンクの場所から解決されるため、cli.js と同じ階層に置く
     const link = join(dir, "dist", "src", `freee-link-${flags.length}.js`);
     symlinkSync(join(dir, "dist", "src", "cli.js"), link);
