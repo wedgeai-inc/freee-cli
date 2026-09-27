@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInvoiceClient } from "../../src/lib/clients/freee-invoice-client.js";
 import { FreeeApiError } from "../../src/lib/clients/freee-public-client.js";
 import { createProgram } from "../../src/cli.js";
-import { formatInvoiceUpdate, InvoiceUpdateGuardError, InvoiceUpdateUnverifiedError, RESPONSE_COPY_KEYS, RESPONSE_DROP_KEYS, RESPONSE_LINE_COPY_KEYS, RESPONSE_LINE_DROP_KEYS, PUT_RESPONSE_LINE_KEYS_LIST, PAYLOAD_CONSTRAINTS, PAYLOAD_ENUMS, UNOBSERVABLE_WARNING, runInvoicesUpdate, type InvoiceUpdateAuditEntry } from "../../src/commands/invoices/update.js";
+import { formatInvoiceUpdate, InvoiceUpdateEmptyFieldError, InvoiceUpdateGuardError, InvoiceUpdateUnverifiedError, RESPONSE_COPY_KEYS, RESPONSE_DROP_KEYS, RESPONSE_LINE_COPY_KEYS, RESPONSE_LINE_DROP_KEYS, PUT_RESPONSE_LINE_KEYS_LIST, PAYLOAD_CONSTRAINTS, PAYLOAD_ENUMS, UNOBSERVABLE_WARNING, runInvoicesUpdate, type InvoiceUpdateAuditEntry } from "../../src/commands/invoices/update.js";
 
 const opts = { companyId: 999, id: 777, planPath: "plan.json", execute: false, logDir: "./audit", taskId: "update-test", allowDealRegistered: false };
 const unobservable = { top: ["include_amount_brought_forward", "partner_contact_email_to", "partner_contact_email_cc", "partner_sending_method"], lines: ["account_item_id", "tax_code", "item_id", "section_id", "tag_ids", "segment_1_tag_id", "segment_2_tag_id", "segment_3_tag_id"] };
@@ -101,9 +101,34 @@ describe("invoices update", () => {
     expect(result.payload).not.toHaveProperty(key);
   });
   // 省略すると取引先マスタから補完される項目は落とさない。落とすと無関係な更新で帳票の宛先が変わる
-  it.each(["partner_contact_department", "partner_contact_name", "partner_address_street_name1", "partner_address_zipcode"])("rejects an empty current %s instead of silently substituting the partner master", async (key) => {
+  it.each(["partner_contact_department", "partner_contact_name", "partner_address_street_name1", "partner_address_zipcode"])("rejects an empty current %s with a guard error naming the field instead of substituting the partner master", async (key) => {
     const put = vi.fn(); const d = deps({ readFile: async () => "{}", getClient: async () => ({ get: async () => ({ json: async () => ({ invoice: { ...invoice, [key]: "" } }) }), put }) });
-    await expect(runInvoicesUpdate({ ...opts, execute: true, expectInvoiceNumber: "INV-777" }, d as never)).rejects.toThrow(/invalid response/);
+    const error = await runInvoicesUpdate({ ...opts, execute: true, expectInvoiceNumber: "INV-777" }, d as never).catch((e) => e);
+    expect(error).toBeInstanceOf(InvoiceUpdateEmptyFieldError);
+    expect(error).toMatchObject({ reason: `empty_current_value:${key}` });
+    expect((error as Error).message).toContain(key);
+    expect(put).not.toHaveBeenCalled();
+  });
+  it("stops with InvoiceUpdateEmptyFieldError (dry-run) when a current string field is empty, naming the field in the message", async () => {
+    const d = deps({ readFile: async () => "{}", getClient: async () => ({ get: async () => ({ json: async () => ({ invoice: { ...invoice, partner_contact_department: "" } }) }) }) });
+    const error = await runInvoicesUpdate(opts, d as never).catch((e) => e);
+    expect(error).toBeInstanceOf(InvoiceUpdateEmptyFieldError);
+    expect(error).toMatchObject({ reason: "empty_current_value:partner_contact_department" });
+    expect((error as Error).message).toBe("invoice update: 現在の請求書で次の項目が空のため、送信前に停止しました（partner_contact_department）。これらは plan では変更できません。freee Web で入力するか空欄のまま Web で更新してください");
+    expect(d.audits).toEqual([expect.objectContaining({ status: "failed", reason: "empty_current_value:partner_contact_department", put_state: "not_attempted" })]);
+  });
+  it("sorts multiple empty current fields alphabetically in the reason (execute)", async () => {
+    const put = vi.fn(); const d = deps({ readFile: async () => "{}", getClient: async () => ({ get: async () => ({ json: async () => ({ invoice: { ...invoice, partner_contact_name: "", partner_address_zipcode: "" } }) }), put }) });
+    const error = await runInvoicesUpdate({ ...opts, execute: true, expectInvoiceNumber: "INV-777" }, d as never).catch((e) => e);
+    expect(error).toBeInstanceOf(InvoiceUpdateEmptyFieldError);
+    expect(error).toMatchObject({ reason: "empty_current_value:partner_address_zipcode,partner_contact_name" });
+    expect(put).not.toHaveBeenCalled();
+  });
+  it("keeps rejecting a non-empty constraint violation as invalid response (not an empty-field guard)", async () => {
+    const put = vi.fn(); const d = deps({ readFile: async () => "{}", getClient: async () => ({ get: async () => ({ json: async () => ({ invoice: { ...invoice, partner_address_zipcode: "abc" } }) }), put }) });
+    const error = await runInvoicesUpdate({ ...opts, execute: true, expectInvoiceNumber: "INV-777" }, d as never).catch((e) => e);
+    expect(error).not.toBeInstanceOf(InvoiceUpdateEmptyFieldError);
+    expect((error as Error).message).toMatch(/invalid response \/invoices\/777/);
     expect(put).not.toHaveBeenCalled();
   });
   it("keeps an empty invoice_note because the request allows minLength 0", async () => {
