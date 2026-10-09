@@ -1,4 +1,4 @@
-import type { PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
+import type { ReadOnlyClient } from "../../lib/clients/read-only-client.js";
 
 export interface PartnersSearchOptions {
   companyId: number;
@@ -15,7 +15,7 @@ export interface PartnerSummary {
 }
 
 export interface PartnersSearchDeps {
-  client: PublicFreeeClient;
+  client: ReadOnlyClient;
 }
 
 export interface PartnersSearchResult {

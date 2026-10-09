@@ -1,4 +1,4 @@
-import type { PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
+import type { ReadOnlyClient } from "../../lib/clients/read-only-client.js";
 import type { ExpenseApplicationSummary } from "../../types/expense.js";
 
 export interface ExpenseListOptions {
@@ -11,7 +11,7 @@ export interface ExpenseListOptions {
 }
 
 export interface ExpenseListDeps {
-  client: PublicFreeeClient;
+  client: ReadOnlyClient;
 }
 
 export interface ExpenseListResult {

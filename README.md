@@ -393,11 +393,14 @@ freee export expense-applications \
 
 ## 他の repo から読み取りだけ使う
 
-`freee-cli/reader`（`src/reader.ts`）は、一覧取得（請求書・経費申請・取引先）と、token を渡して作る API client だけを出す。書き込みコマンドの関数は出さない。
+`freee-cli/reader`（`src/reader.ts`）は、一覧取得（請求書・経費申請・取引先）と、GET だけを実行できる読み取り専用 client（`createReadOnlyClient`）を出す。
+`PublicFreeeClient` と書き込みコマンドの関数は出さない（post / put / patch / delete / 任意メソッドの request を持たず、包んだ実体も取り出せない）。
 `npm pack` で作った tarball を `file:` 依存にして使う（`prepack` が `npm run build` を実行する）。
 
 ```ts
-import { createInvoiceClient, runInvoicesList } from "freee-cli/reader";
+import { createReadOnlyClient, runInvoicesList } from "freee-cli/reader";
+const client = createReadOnlyClient({ api: "invoice", token });
+await runInvoicesList({ companyId }, { client });
 ```
 
 ## 開発
