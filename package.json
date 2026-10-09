@@ -5,6 +5,15 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "exports": {
+    "./reader": {
+      "types": "./dist/src/reader.d.ts",
+      "default": "./dist/src/reader.js"
+    }
+  },
+  "files": [
+    "dist/src"
+  ],
   "engines": {
     "node": ">=22.12.0"
   },
@@ -15,7 +24,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "runtime-oauth-exec": "tsx src/commands/auth/runtime-oauth-exec.ts"
+    "runtime-oauth-exec": "tsx src/commands/auth/runtime-oauth-exec.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "commander": "^15.0.0"
