@@ -391,6 +391,18 @@ freee export expense-applications \
 - 添付 receipt は、対象期間内の `purchase_lines[].transaction_date` に紐づく `receipt_id` / `sub_receipt_ids` のみを保存する。
 - すべて GET のみ。経費精算の承認・取引登録は行わない。
 
+## 他の repo から読み取りだけ使う
+
+`freee-cli/reader`（`src/reader.ts`）は、一覧取得（請求書・経費申請・取引先）と、GET だけを実行できる読み取り専用 client（`createReadOnlyClient`）を出す。
+`PublicFreeeClient` と書き込みコマンドの関数は出さない（post / put / patch / delete / 任意メソッドの request を持たず、包んだ実体も取り出せない）。
+`npm pack` で作った tarball を `file:` 依存にして使う（`prepack` が `npm run build` を実行する）。
+
+```ts
+import { createReadOnlyClient, runInvoicesList } from "freee-cli/reader";
+const client = createReadOnlyClient({ api: "invoice", token });
+await runInvoicesList({ companyId }, { client });
+```
+
 ## 開発
 
 ```bash

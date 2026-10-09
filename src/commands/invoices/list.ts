@@ -1,4 +1,4 @@
-import type { PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
+import type { ReadOnlyClient } from "../../lib/clients/read-only-client.js";
 import { invoiceWebUrl } from "../../lib/clients/freee-invoice-client.js";
 import { toInvoiceSummary, type InvoiceSummary } from "../../types/invoice.js";
 
@@ -15,7 +15,7 @@ export interface InvoicesListOptions {
 }
 
 export interface InvoicesListDeps {
-  client: PublicFreeeClient;
+  client: ReadOnlyClient;
 }
 
 export interface InvoicesListResult {
