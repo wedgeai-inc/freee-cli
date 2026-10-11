@@ -53,12 +53,35 @@ describe("runInvoicesCreate", () => {
     expect(formatInvoiceCreate(result)).toContain("参考値");
   });
 
+  for (const over of [{ billing_date: "2026-09-06" }, { partner_id: 124 }]) {
+    it(`CLI path: read-back differing from the plan (${Object.keys(over)[0]}) is unverified, not success`, async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 555 } }), { status: 201 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 555, invoice_number: "INV-1", total_amount: 616770, partner_id: 123, billing_date: "2026-09-05", ...over } }), { status: 200 }));
+      const d = deps(fetchMock);
+      const e = await runInvoicesCreate({ ...opts, execute: true }, d.deps).catch((x) => x);
+      expect(e).toBeInstanceOf(InvoiceCreatedButUnverifiedError);
+      expect(e.createdId).toBe(555);
+    });
+  }
+  it("AuditWriteError.message does not copy the original exception text", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 555 } }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 555, invoice_number: "INV-1", total_amount: 616770, partner_id: 123, billing_date: "2026-09-05" } }), { status: 200 }));
+    const d = deps(fetchMock);
+    const e = await runInvoicesCreate({ ...opts, execute: true }, { ...d.deps, appendAudit: async () => { throw new Error("Bearer SECRET-xyz"); } }).catch((x) => x);
+    expect(e).toBeInstanceOf(AuditWriteError);
+    expect(e.message).not.toContain("SECRET-xyz");
+    expect(e.message).toContain("audit-failed");
+  });
   it("execute posts then reads back and records created", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 555 } }), { status: 201 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ invoice: { id: 555, invoice_number: "INV-1", total_amount: 616770 } }), { status: 200 }),
+        new Response(JSON.stringify({ invoice: { id: 555, invoice_number: "INV-1", total_amount: 616770, partner_id: 123, billing_date: "2026-09-05" } }), { status: 200 }),
       );
     const d = deps(fetchMock);
     const result = await runInvoicesCreate({ ...opts, execute: true }, d.deps);

@@ -43,7 +43,10 @@ export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: Invoic
   return createInvoiceFromPlan(raw, opts, deps);
 }
 
-export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath">;
+export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath"> & {
+  /** 指定すると、読み戻した合計金額（freee の確定値）がこの値と一致しなければ成功にしない。CLI は参考値の丸め差があり得るため渡さない */
+  expectedTotal?: number;
+};
 export type InvoiceCreateFromPlanDeps = Omit<InvoiceCreateDeps, "readFile">;
 
 /**
@@ -90,7 +93,9 @@ export async function createInvoiceFromPlan(raw: unknown, opts: InvoiceCreateFro
     }
     createdId = readCreatedId(await parseJson(postRes, "/invoices"));
     const getRes = await client.get(`/invoices/${createdId}`, { query: { company_id: opts.companyId } });
-    const created = readCreatedDetail(await parseJson(getRes, "/invoices/{id}"), createdId);
+    const readBack = await parseJson(getRes, "/invoices/{id}");
+    const created = readCreatedDetail(readBack, createdId);
+    assertReadBackMatches(readBack, plan, opts.expectedTotal);
     await appendAuditSafely(deps, { ...base, timestamp: deps.now().toISOString(), status: "created", created_id: createdId }, postState);
     return { mode, payload, totals, created };
   } catch (err) {
@@ -157,6 +162,24 @@ function readCreatedId(json: unknown): number {
   return id;
 }
 
+/** 読み戻した内容が指定した plan と食い違えば成功にしない（作成済みの可能性があるので呼び手は unverified として扱う）。 */
+function assertReadBackMatches(json: unknown, plan: { billing_date: string; partner_id?: number; invoice_number?: string }, expectedTotal: number | undefined): void {
+  const inv = (json as { invoice?: Record<string, unknown> }).invoice as Record<string, unknown>;
+  if (inv.billing_date !== plan.billing_date) throw new ReadBackMismatchError("billing_date");
+  if (plan.partner_id !== undefined && inv.partner_id !== plan.partner_id) throw new ReadBackMismatchError("partner_id");
+  if (plan.invoice_number !== undefined && plan.invoice_number !== "" && inv.invoice_number !== plan.invoice_number) throw new ReadBackMismatchError("invoice_number");
+  if (expectedTotal !== undefined && inv.total_amount !== expectedTotal) throw new ReadBackMismatchError("total_amount");
+}
+
+export class ReadBackMismatchError extends Error {
+  readonly field: string;
+  constructor(field: string) {
+    super(`invoice create: read-back ${field} does not match the plan`);
+    this.name = "ReadBackMismatchError";
+    this.field = field;
+  }
+}
+
 export function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
   const inv = (json as { invoice?: Record<string, unknown> } | null)?.invoice;
   if (!inv || inv.id !== id || typeof inv.invoice_number !== "string" || typeof inv.total_amount !== "number") {
@@ -186,7 +209,9 @@ export class AuditWriteError extends Error {
     return this.postState === "succeeded";
   }
   constructor(status: string, createdId: number | undefined, detail: string, postState: PostState) {
-    super(`invoice create: audit（${status}）の書き込みに失敗（${detail}）。${noRerunWarning(postState, createdId)}`);
+    // detail（元の例外のメッセージ）は message に写さない。token などが紛れ込みうるため固定の分類 audit-failed にする
+    void detail;
+    super(`invoice create: audit（${status}）の書き込みに失敗（audit-failed）。${noRerunWarning(postState, createdId)}`);
     this.name = "AuditWriteError";
     this.createdId = createdId;
     this.postState = postState;
@@ -204,6 +229,7 @@ export function classifyFailure(err: unknown): string {
   if (err instanceof Error && err.message.startsWith("invoice create: read-back response")) {
     return "invalid_response:/invoices/{id}";
   }
+  if (err instanceof ReadBackMismatchError) return `readback_mismatch:${err.field}`;
   if (err instanceof ResponseParseError) return `invalid_response:${err.path}`;
   return "request_failed:/invoices";
 }

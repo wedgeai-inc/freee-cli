@@ -9,21 +9,49 @@
 import { appendInvoiceAudit, type InvoiceAuditEntry } from "./lib/audit/invoice-audit.js";
 import { createInvoiceClient } from "./lib/clients/freee-invoice-client.js";
 import { createReadOnlyClient } from "./lib/clients/read-only-client.js";
-import { createInvoiceFromPlan, type InvoiceCreateResult } from "./commands/invoices/create.js";
-import { invoiceWebUrl } from "./lib/clients/freee-invoice-client.js";
-
-export {
+import {
   AuditWriteError,
   InvoiceCreatedButUnverifiedError,
-  ResponseParseError,
-  classifyFailure,
+  createInvoiceFromPlan,
+  type InvoiceCreateResult,
 } from "./commands/invoices/create.js";
+import { FreeeApiError } from "./lib/clients/freee-public-client.js";
+import { invoiceWebUrl } from "./lib/clients/freee-invoice-client.js";
+
+export { AuditWriteError, InvoiceCreatedButUnverifiedError, ResponseParseError, classifyFailure } from "./commands/invoices/create.js";
 export type { InvoiceCreated, InvoiceCreateResult, PostState } from "./commands/invoices/create.js";
 export { FreeeApiError } from "./lib/clients/freee-public-client.js";
 export { appendInvoiceAudit } from "./lib/audit/invoice-audit.js";
 export type { InvoiceAuditEntry } from "./lib/audit/invoice-audit.js";
 export type { InvoicePlan, InvoicePlanLine, InvoiceTotals } from "./domain/invoice-plan.js";
 export { parseInvoicePlan } from "./domain/invoice-plan.js";
+
+export type WriterErrorCode = "token-unavailable" | "http-failed" | "audit-failed" | "invalid-response" | "request-failed";
+
+/**
+ * 外部に依存する部分（token の取得・HTTP・audit の書き込み・応答の解釈）の失敗を、固定の分類で表す例外。
+ * 元の例外のメッセージ・cause は持たない（token などが紛れ込みうるため）。http-failed のときだけ status と path を持つ。
+ */
+export class WriterError extends Error {
+  readonly code: WriterErrorCode;
+  readonly status?: number;
+  readonly path?: string;
+  constructor(code: WriterErrorCode, extra?: { status?: number; path?: string }) {
+    super(`freee-cli writer: ${code}${extra?.status !== undefined ? ` (${extra.status} ${extra.path ?? ""})` : ""}`);
+    this.name = "WriterError";
+    this.code = code;
+    if (extra?.status !== undefined) this.status = extra.status;
+    if (extra?.path !== undefined) this.path = extra.path;
+  }
+}
+
+/** 公開の口から外へ出す例外を、固定の分類のものだけにする。POST の状態を持つ例外はそのまま通す（メッセージは固定の分類のみで作られている）。 */
+function sanitize(err: unknown): Error {
+  if (err instanceof WriterError || err instanceof InvoiceCreatedButUnverifiedError || err instanceof AuditWriteError) return err;
+  if (err instanceof FreeeApiError) return new WriterError("http-failed", { status: err.status, path: err.path });
+  if (err instanceof Error && err.name === "InvoicePlanError") return err; // plan の検査の失敗。plan の内容だけから作られる
+  return new WriterError("request-failed");
+}
 
 export interface WriterAuth {
   /** token の供給元。execute のときだけ、POST の直前に 1 回呼ぶ（読み戻しも同じ token）。値はログへ出さない */
@@ -37,6 +65,8 @@ export interface CreateInvoiceInput {
   plan: unknown;
   /** 省略時は dry-run。送るには true を明示する（true 以外の値は拒否） */
   execute?: boolean;
+  /** 指定すると、読み戻した合計金額がこの値と一致しなければ成功にしない（承認した内容の合計を渡す） */
+  expectedTotalAmount?: number;
   taskId: string;
   /** audit log（JSONL）の出力先。appendAudit を渡すときは不要 */
   logDir?: string;
@@ -54,8 +84,13 @@ function assertCompanyId(id: unknown): asserts id is number {
 
 async function resolveToken(getToken: () => Promise<string>): Promise<string> {
   if (typeof getToken !== "function") throw new Error("writer: getToken must be a function");
-  const token = await getToken();
-  if (typeof token !== "string" || token.trim() === "") throw new Error("writer: getToken returned an empty token");
+  let token: unknown;
+  try {
+    token = await getToken();
+  } catch {
+    throw new WriterError("token-unavailable"); // 元の例外のメッセージは出さない
+  }
+  if (typeof token !== "string" || token.trim() === "") throw new WriterError("token-unavailable");
   return token;
 }
 
@@ -67,15 +102,51 @@ export async function createInvoice(input: CreateInvoiceInput, deps: CreateInvoi
   const logDir = input.logDir;
   const appendAudit = deps.appendAudit ?? (logDir ? (e: InvoiceAuditEntry) => appendInvoiceAudit(logDir, e) : undefined);
   if (!appendAudit) throw new Error("writer: appendAudit or logDir is required (no write without an audit log)");
-  return createInvoiceFromPlan(
-    input.plan,
-    { companyId: input.companyId, execute: input.execute === true, logDir: logDir ?? "", taskId: input.taskId },
-    {
-      getClient: async () => createInvoiceClient({ token: await resolveToken(deps.getToken), ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}) }),
-      appendAudit,
-      now: deps.now ?? (() => new Date()),
-    },
-  );
+  if (typeof deps.getToken !== "function") throw new Error("writer: getToken must be a function");
+  if (input.expectedTotalAmount !== undefined && (typeof input.expectedTotalAmount !== "number" || !Number.isFinite(input.expectedTotalAmount))) {
+    throw new Error("writer: expectedTotalAmount must be a finite number");
+  }
+  // 入口で、呼び手のオブジェクトから独立した素のデータにする。以降の待ち（token の取得など）の間に呼び手が書き換えても、検査済みの内容が送られる。
+  // 検査（parseInvoicePlan）も、このコピーに対してだけ行う
+  const plan = snapshotPlan(input.plan);
+  const wrappedAudit = async (entry: InvoiceAuditEntry): Promise<void> => {
+    try {
+      await appendAudit(entry);
+    } catch {
+      throw new WriterError("audit-failed"); // 元の例外のメッセージは出さない
+    }
+  };
+  try {
+    return await createInvoiceFromPlan(
+      plan,
+      {
+        companyId: input.companyId,
+        execute: input.execute === true,
+        logDir: logDir ?? "",
+        taskId: input.taskId,
+        ...(input.expectedTotalAmount !== undefined ? { expectedTotal: input.expectedTotalAmount } : {}),
+      },
+      {
+        getClient: async () => createInvoiceClient({ token: await resolveToken(deps.getToken), ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}) }),
+        appendAudit: wrappedAudit,
+        now: deps.now ?? (() => new Date()),
+      },
+    );
+  } catch (err) {
+    throw sanitize(err);
+  }
+}
+
+/** JSON の往復で素のデータにする（getter は 1 回評価され、Proxy・独自のメソッドは残らない）。JSON にできないものは拒否する。 */
+function snapshotPlan(plan: unknown): unknown {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(plan);
+  } catch {
+    throw new Error("writer: plan must be JSON-serializable");
+  }
+  if (text === undefined) throw new Error("writer: plan must be JSON-serializable");
+  return JSON.parse(text);
 }
 
 export interface InvoiceReadBack {
@@ -92,19 +163,21 @@ export async function readBackInvoice(input: { companyId: number; id: number }, 
   assertCompanyId(input.companyId);
   if (!Number.isSafeInteger(input.id) || input.id <= 0) throw new Error("writer: id must be a positive integer");
   const client = createReadOnlyClient({ api: "invoice", token: await resolveToken(auth.getToken), ...(auth.fetchFn ? { fetchFn: auth.fetchFn } : {}) });
-  const res = await client.get(`/invoices/${input.id}`, { query: { company_id: input.companyId } });
   let json: unknown;
   try {
+    const res = await client.get(`/invoices/${input.id}`, { query: { company_id: input.companyId } });
     json = await res.json();
-  } catch {
-    throw new Error("writer: read-back response is not valid JSON");
+  } catch (err) {
+    if (err instanceof FreeeApiError) throw new WriterError("http-failed", { status: err.status, path: err.path });
+    if (err instanceof SyntaxError) throw new WriterError("invalid-response");
+    throw new WriterError("request-failed");
   }
   const inv = (json as { invoice?: Record<string, unknown> } | null)?.invoice;
   if (
     !inv || inv.id !== input.id || typeof inv.invoice_number !== "string" || typeof inv.total_amount !== "number" ||
     typeof inv.partner_id !== "number" || typeof inv.billing_date !== "string"
   ) {
-    throw new Error("writer: read-back response is missing id / invoice_number / partner_id / billing_date / total_amount");
+    throw new WriterError("invalid-response");
   }
   return {
     id: input.id,
