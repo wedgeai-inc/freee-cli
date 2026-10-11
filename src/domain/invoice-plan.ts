@@ -97,7 +97,7 @@ export const INVOICE_PLAN_ALLOWED_LINE_KEYS = [
  ] as const;
 const ALLOWED_LINE_KEYS = new Set<string>(INVOICE_PLAN_ALLOWED_LINE_KEYS);
 
-class PlanError extends Error {
+export class PlanError extends Error {
   constructor(message: string) {
     super(`invoice plan: ${message}`);
     this.name = "InvoicePlanError";
@@ -206,7 +206,8 @@ export function parseInvoicePlanLine(raw: unknown, index: number): InvoicePlanLi
   if (reduced === true && taxRate !== 8) throw new PlanError(`${at}.reduced_tax_rate requires tax_rate 8`);
   const tagIds = raw.tag_ids;
   if (tagIds !== undefined) {
-    if (!Array.isArray(tagIds) || tagIds.length > 10 || tagIds.some((t) => !Number.isSafeInteger(t) || (t as number) < 1)) {
+    // 入力側の配列のメソッドは呼ばない（差し替えられた some / map / slice で検査を迂回されないため）
+    if (!Array.isArray(tagIds) || tagIds.length > 10 || Array.prototype.some.call(tagIds, (t) => !Number.isSafeInteger(t) || (t as number) < 1)) {
       throw new PlanError(`${at}.tag_ids must be up to 10 positive integers`);
     }
   }
@@ -224,7 +225,7 @@ export function parseInvoicePlanLine(raw: unknown, index: number): InvoicePlanLi
   if (reduced !== undefined) line.reduced_tax_rate = reduced;
   const withholding = optionalBoolean(raw, "withholding");
   if (withholding !== undefined) line.withholding = withholding;
-  if (tagIds !== undefined) line.tag_ids = tagIds as number[];
+  if (tagIds !== undefined) line.tag_ids = Array.prototype.slice.call(tagIds) as number[]; // 入力と別の配列にする
   return line;
 }
 
@@ -257,7 +258,7 @@ export function parseInvoicePlan(raw: unknown): InvoicePlan {
     tax_entry_method: requireEnum<TaxEntryMethod>(raw, "tax_entry_method", IN_OUT),
     tax_fraction: requireEnum<Fraction>(raw, "tax_fraction", FRACTIONS),
     withholding_tax_entry_method: requireEnum<"in" | "out">(raw, "withholding_tax_entry_method", IN_OUT),
-    lines: linesRaw.map((l, i) => parseInvoicePlanLine(l, i)),
+    lines: Array.prototype.map.call(linesRaw, (l, i) => parseInvoicePlanLine(l, i as number)) as InvoicePlanLine[],
   };
   if (partnerId !== undefined) plan.partner_id = partnerId;
   if (partnerCode !== undefined) plan.partner_code = partnerCode;

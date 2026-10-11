@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import { FreeeApiError, type PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import { redact } from "../../lib/audit/redactor.js";
 import type { PartnerUpdateAuditEntry } from "../../lib/audit/partner-audit.js";
@@ -57,7 +58,7 @@ function readback(partner: Record<string, unknown>, payload: Record<string, unkn
   const ignored = leaves(payload).filter(({ path }) => path[0] !== "company_id").filter(({ path, value }) => !equal(project(path, getPath(partner, path)), project(path, value))).map(({ path }) => path.join("."));
   return { id, name: partner.name as string, ignored };
 }
-export async function runPartnersUpdate(opts: PartnerUpdateOptions, deps: PartnerUpdateDeps): Promise<PartnerUpdateResult> {
+export async function runPartnersUpdate(opts: PartnerUpdateOptions, deps: PartnerUpdateDeps): Promise<PartnerUpdateResult> { deps = { ...deps, now: stableClock(deps.now) };
   let raw: unknown; try { raw = JSON.parse(await deps.readFile(opts.planPath)); } catch (error) { throw error instanceof SyntaxError ? new PartnerPlanError("invalid JSON") : new PartnerPlanError("plan file cannot be read"); }
   const plan = parsePartnerUpdatePlan(raw) as Record<string, unknown>; const mode = opts.execute ? "execute" as const : "dry-run" as const;
   let payload: Record<string, unknown> = { company_id: opts.companyId, ...plan };

@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import { FreeeApiError, type PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import { redact } from "../../lib/audit/redactor.js";
 import type { PartnerAuditEntry } from "../../lib/audit/partner-audit.js";
@@ -42,7 +43,7 @@ function checkDetail(value: Record<string, unknown>, id: number, companyId: numb
   return { name: value.name, code: value.code as string | null, ignored };
 }
 function classifyPost(error: unknown): PartnerPostState { return error instanceof FreeeApiError && error.status >= 400 && error.status < 500 ? "rejected" : "unknown"; }
-export async function runPartnersCreate(opts: PartnerCreateOptions, deps: PartnerCreateDeps): Promise<PartnerCreateResult> {
+export async function runPartnersCreate(opts: PartnerCreateOptions, deps: PartnerCreateDeps): Promise<PartnerCreateResult> { deps = { ...deps, now: stableClock(deps.now) };
   let raw: unknown; try { raw = JSON.parse(await deps.readFile(opts.planPath)); } catch (error) { throw error instanceof SyntaxError ? new PartnerPlanError("invalid JSON") : new PartnerPlanError("plan file cannot be read"); }
   const plan = parsePartnerPlan(raw); const payload: Record<string, unknown> = { company_id: opts.companyId, ...plan }; const mode = opts.execute ? "execute" as const : "dry-run" as const;
   const base = { task_id: opts.taskId, event: "partner_create" as const, mode, company_id: opts.companyId, payload_redacted: redact(payload) };

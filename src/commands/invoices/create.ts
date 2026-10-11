@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import type { PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import { FreeeApiError } from "../../lib/clients/freee-public-client.js";
 import { invoiceWebUrl } from "../../lib/clients/freee-invoice-client.js";
@@ -36,10 +37,26 @@ export interface InvoiceCreateResult {
 }
 
 /**
- * 請求書ドラフトを 1 件作成する。dry-run 既定。execute 時のみ POST → 読み戻し GET。
+ * 請求書ドラフトを 1 件作成する（CLI 用: plan は JSON ファイルから読む）。dry-run 既定。execute 時のみ POST → 読み戻し GET。
  */
-export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: InvoiceCreateDeps): Promise<InvoiceCreateResult> {
+export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: InvoiceCreateDeps): Promise<InvoiceCreateResult> { deps = { ...deps, now: stableClock(deps.now) };
   const raw: unknown = JSON.parse(await deps.readFile(opts.planPath));
+  return createInvoiceFromPlan(raw, opts, deps);
+}
+
+export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath"> & {
+  /** 指定すると、読み戻した合計金額（freee の確定値）がこの値と一致しなければ成功にしない。CLI は参考値の丸め差があり得るため渡さない */
+  expectedTotal?: number;
+};
+export type InvoiceCreateFromPlanDeps = Omit<InvoiceCreateDeps, "readFile">;
+
+/**
+ * plan のオブジェクトから請求書ドラフトを 1 件作成する（CLI と `freee-cli/writer` が共有する唯一の書き込み経路）。
+ * 検査（parseInvoicePlan）・dry-run 既定・POST 状態・読み戻し・audit は CLI と同じ。
+ */
+export async function createInvoiceFromPlan(raw: unknown, opts: InvoiceCreateFromPlanOptions, deps: InvoiceCreateFromPlanDeps): Promise<InvoiceCreateResult> {
+  // 書き込みの前に時刻を 1 回取る。以後の時計の失敗で POST の状態を持つ例外・audit の記録が失われないようにする
+  deps = { ...deps, now: stableClock(deps.now) };
   const plan = parseInvoicePlan(raw);
   const totals = computeInvoiceTotals(plan);
   const payload: Record<string, unknown> = { company_id: opts.companyId, ...plan };
@@ -79,7 +96,9 @@ export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: Invoic
     }
     createdId = readCreatedId(await parseJson(postRes, "/invoices"));
     const getRes = await client.get(`/invoices/${createdId}`, { query: { company_id: opts.companyId } });
-    const created = readCreatedDetail(await parseJson(getRes, "/invoices/{id}"), createdId);
+    const readBack = await parseJson(getRes, "/invoices/{id}");
+    const created = readCreatedDetail(readBack, createdId);
+    assertReadBackMatches(readBack, plan, opts.expectedTotal);
     await appendAuditSafely(deps, { ...base, timestamp: deps.now().toISOString(), status: "created", created_id: createdId }, postState);
     return { mode, payload, totals, created };
   } catch (err) {
@@ -146,7 +165,25 @@ function readCreatedId(json: unknown): number {
   return id;
 }
 
-function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
+/** 読み戻した内容が指定した plan と食い違えば成功にしない（作成済みの可能性があるので呼び手は unverified として扱う）。 */
+function assertReadBackMatches(json: unknown, plan: { billing_date: string; partner_id?: number; invoice_number?: string }, expectedTotal: number | undefined): void {
+  const inv = (json as { invoice?: Record<string, unknown> }).invoice as Record<string, unknown>;
+  if (inv.billing_date !== plan.billing_date) throw new ReadBackMismatchError("billing_date");
+  if (plan.partner_id !== undefined && inv.partner_id !== plan.partner_id) throw new ReadBackMismatchError("partner_id");
+  if (plan.invoice_number !== undefined && plan.invoice_number !== "" && inv.invoice_number !== plan.invoice_number) throw new ReadBackMismatchError("invoice_number");
+  if (expectedTotal !== undefined && inv.total_amount !== expectedTotal) throw new ReadBackMismatchError("total_amount");
+}
+
+export class ReadBackMismatchError extends Error {
+  readonly field: string;
+  constructor(field: string) {
+    super(`invoice create: read-back ${field} does not match the plan`);
+    this.name = "ReadBackMismatchError";
+    this.field = field;
+  }
+}
+
+export function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
   const inv = (json as { invoice?: Record<string, unknown> } | null)?.invoice;
   if (!inv || inv.id !== id || typeof inv.invoice_number !== "string" || typeof inv.total_amount !== "number") {
     throw new Error("invoice create: read-back response is missing id / invoice_number / total_amount");
@@ -155,7 +192,7 @@ function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
 }
 
 /** audit の書き込み失敗は元の処理の結果を置き換えない（AuditWriteError として投げる。POST 状態と createdId を持つ）。 */
-async function appendAuditSafely(deps: InvoiceCreateDeps, entry: InvoiceAuditEntry, postState: PostState): Promise<void> {
+async function appendAuditSafely(deps: Pick<InvoiceCreateDeps, "appendAudit">, entry: InvoiceAuditEntry, postState: PostState): Promise<void> {
   try {
     await deps.appendAudit(entry);
   } catch (auditErr) {
@@ -175,7 +212,9 @@ export class AuditWriteError extends Error {
     return this.postState === "succeeded";
   }
   constructor(status: string, createdId: number | undefined, detail: string, postState: PostState) {
-    super(`invoice create: audit（${status}）の書き込みに失敗（${detail}）。${noRerunWarning(postState, createdId)}`);
+    // detail（元の例外のメッセージ）は message に写さない。token などが紛れ込みうるため固定の分類 audit-failed にする
+    void detail;
+    super(`invoice create: audit（${status}）の書き込みに失敗（audit-failed）。${noRerunWarning(postState, createdId)}`);
     this.name = "AuditWriteError";
     this.createdId = createdId;
     this.postState = postState;
@@ -193,6 +232,7 @@ export function classifyFailure(err: unknown): string {
   if (err instanceof Error && err.message.startsWith("invoice create: read-back response")) {
     return "invalid_response:/invoices/{id}";
   }
+  if (err instanceof ReadBackMismatchError) return `readback_mismatch:${err.field}`;
   if (err instanceof ResponseParseError) return `invalid_response:${err.path}`;
   return "request_failed:/invoices";
 }

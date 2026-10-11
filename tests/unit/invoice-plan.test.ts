@@ -216,3 +216,28 @@ describe("computeInvoiceTotals", () => {
     expect(computeInvoiceTotals(plan).total).toBe(616_770);
   });
 });
+
+describe("parseInvoicePlan does not trust the input arrays' methods", () => {
+  const base = () => ({
+    billing_date: "2026-09-05", partner_id: 1, partner_title: "御中", tax_entry_method: "out", tax_fraction: "omit",
+    withholding_tax_entry_method: "out",
+    lines: [{ type: "item", description: "a", quantity: 1, unit_price: "1", tax_rate: 10, tag_ids: [1, 2] }],
+  });
+  it("returns a tag_ids array separate from the input", () => {
+    const raw = base();
+    const plan = parseInvoicePlan(raw);
+    expect(plan.lines[0]!.tag_ids).toEqual([1, 2]);
+    expect(plan.lines[0]!.tag_ids).not.toBe(raw.lines[0]!.tag_ids);
+  });
+  it("an overridden some() cannot hide an invalid tag id", () => {
+    const raw = base();
+    (raw.lines[0]!.tag_ids as number[]).push(-1);
+    (raw.lines[0]!.tag_ids as any).some = () => false;
+    expect(() => parseInvoicePlan(raw)).toThrow(/tag_ids/);
+  });
+  it("an overridden lines.map() cannot replace the validated lines", () => {
+    const raw = base();
+    (raw.lines as any).map = () => [{ type: "item", description: "evil", quantity: 1, unit_price: "999", tax_rate: 10 }];
+    expect(parseInvoicePlan(raw).lines[0]!.description).toBe("a");
+  });
+});
