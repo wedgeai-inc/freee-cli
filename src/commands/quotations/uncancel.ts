@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import { FreeeApiError, type PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import type { QuotationUncancelAuditEntry } from "../../lib/audit/quotation-audit.js";
 import { validateQuotationId } from "./id.js";
@@ -23,7 +24,7 @@ function reason(error: unknown, phase: Phase): string { if (error instanceof Quo
 function classifyPutState(error: unknown): QuotationUncancelPutState { return error instanceof FreeeApiError && [400, 401, 403, 404].includes(error.status) ? "rejected" : "unknown"; }
 function canExposeAuditError(state: QuotationUncancelPutState): boolean { return state === "not_attempted" || state === "rejected"; }
 function mustWrapUnverified(state: QuotationUncancelPutState): state is "unknown" | "succeeded" { return state === "unknown" || state === "succeeded"; }
-export async function runQuotationsUncancel(opts: QuotationUncancelOptions, deps: QuotationUncancelDeps): Promise<QuotationUncancelResult> {
+export async function runQuotationsUncancel(opts: QuotationUncancelOptions, deps: QuotationUncancelDeps): Promise<QuotationUncancelResult> { deps = { ...deps, now: stableClock(deps.now) };
   validateQuotationId(opts.id); const mode = opts.execute ? "execute" as const : "dry-run" as const; const base = { task_id: opts.taskId, event: "quotation_uncancel" as const, mode, company_id: opts.companyId, quotation_id: opts.id }; let putState: QuotationUncancelPutState = "not_attempted"; let phase: Phase = "initial_get"; let clientFailureAudited = false;
   try { if (opts.execute && opts.expectQuotationNumber === undefined) throw new QuotationUncancelGuardError("mismatch:quotation_number"); let client: PublicFreeeClient; try { client = await deps.getClient(); } catch (error) { await appendAudit(deps, { ...base, timestamp: deps.now().toISOString(), status: "failed", reason: "client_unavailable", put_state: putState }); clientFailureAudited = true; throw error; }
     const { target, cancelStatus } = readTarget(await parseJson(await client.get(pathFor(opts.id), { query: { company_id: opts.companyId } }), pathFor(opts.id)), opts.id, opts.companyId); if (opts.expectQuotationNumber !== undefined && target.quotation_number !== opts.expectQuotationNumber) throw new QuotationUncancelGuardError("mismatch:quotation_number"); assertCanceledStatus(cancelStatus, pathFor(opts.id)); if (!opts.execute) { await appendAudit(deps, { ...base, timestamp: deps.now().toISOString(), status: "planned", put_state: putState }); return { mode, companyId: opts.companyId, id: opts.id, target }; }

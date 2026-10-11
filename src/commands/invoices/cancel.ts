@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import { FreeeApiError, type PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import type { InvoiceCancelAuditEntry } from "../../lib/audit/invoice-audit.js";
 import { validateInvoiceMutationId } from "./id.js";
@@ -25,7 +26,7 @@ export function classifyInvoicePutState(error: unknown): "rejected" | "unknown" 
 function classifyPutState(error: unknown): InvoiceCancelPutState { return classifyInvoicePutState(error); }
 function canExposeAuditError(state: InvoiceCancelPutState): boolean { return state === "not_attempted" || state === "rejected"; }
 function mustWrapUnverified(state: InvoiceCancelPutState): state is "unknown" | "succeeded" { return state === "unknown" || state === "succeeded"; }
-export async function runInvoicesCancel(opts: InvoiceCancelOptions, deps: InvoiceCancelDeps): Promise<InvoiceCancelResult> {
+export async function runInvoicesCancel(opts: InvoiceCancelOptions, deps: InvoiceCancelDeps): Promise<InvoiceCancelResult> { deps = { ...deps, now: stableClock(deps.now) };
   validateInvoiceMutationId(opts.id); const mode = opts.execute ? "execute" as const : "dry-run" as const; const base = { task_id: opts.taskId, event: "invoice_cancel" as const, mode, company_id: opts.companyId, invoice_id: opts.id }; let putState: InvoiceCancelPutState = "not_attempted"; let clientFailureAudited = false;
   try {
     if (opts.execute && opts.expectInvoiceNumber === undefined) throw new InvoiceCancelGuardError("mismatch:invoice_number");

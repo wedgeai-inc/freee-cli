@@ -97,7 +97,7 @@ export const INVOICE_PLAN_ALLOWED_LINE_KEYS = [
  ] as const;
 const ALLOWED_LINE_KEYS = new Set<string>(INVOICE_PLAN_ALLOWED_LINE_KEYS);
 
-class PlanError extends Error {
+export class PlanError extends Error {
   constructor(message: string) {
     super(`invoice plan: ${message}`);
     this.name = "InvoicePlanError";

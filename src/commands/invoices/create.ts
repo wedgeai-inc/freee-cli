@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import type { PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import { FreeeApiError } from "../../lib/clients/freee-public-client.js";
 import { invoiceWebUrl } from "../../lib/clients/freee-invoice-client.js";
@@ -38,7 +39,7 @@ export interface InvoiceCreateResult {
 /**
  * 請求書ドラフトを 1 件作成する（CLI 用: plan は JSON ファイルから読む）。dry-run 既定。execute 時のみ POST → 読み戻し GET。
  */
-export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: InvoiceCreateDeps): Promise<InvoiceCreateResult> {
+export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: InvoiceCreateDeps): Promise<InvoiceCreateResult> { deps = { ...deps, now: stableClock(deps.now) };
   const raw: unknown = JSON.parse(await deps.readFile(opts.planPath));
   return createInvoiceFromPlan(raw, opts, deps);
 }
@@ -54,6 +55,8 @@ export type InvoiceCreateFromPlanDeps = Omit<InvoiceCreateDeps, "readFile">;
  * 検査（parseInvoicePlan）・dry-run 既定・POST 状態・読み戻し・audit は CLI と同じ。
  */
 export async function createInvoiceFromPlan(raw: unknown, opts: InvoiceCreateFromPlanOptions, deps: InvoiceCreateFromPlanDeps): Promise<InvoiceCreateResult> {
+  // 書き込みの前に時刻を 1 回取る。以後の時計の失敗で POST の状態を持つ例外・audit の記録が失われないようにする
+  deps = { ...deps, now: stableClock(deps.now) };
   const plan = parseInvoicePlan(raw);
   const totals = computeInvoiceTotals(plan);
   const payload: Record<string, unknown> = { company_id: opts.companyId, ...plan };

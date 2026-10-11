@@ -1,3 +1,4 @@
+import { stableClock } from "../../lib/clock.js";
 import { FreeeApiError, type PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import type { QuotationCancelAuditEntry } from "../../lib/audit/quotation-audit.js";
 import { validateQuotationId } from "./id.js";
@@ -26,7 +27,7 @@ function classifyPutState(error: unknown): QuotationCancelPutState { return erro
 function canExposeAuditError(state: QuotationCancelPutState): boolean { return state === "not_attempted" || state === "rejected"; }
 function mustWrapUnverified(state: QuotationCancelPutState): state is "unknown" | "succeeded" { return state === "unknown" || state === "succeeded"; }
 
-export async function runQuotationsCancel(opts: QuotationCancelOptions, deps: QuotationCancelDeps): Promise<QuotationCancelResult> {
+export async function runQuotationsCancel(opts: QuotationCancelOptions, deps: QuotationCancelDeps): Promise<QuotationCancelResult> { deps = { ...deps, now: stableClock(deps.now) };
   validateQuotationId(opts.id);
   const mode = opts.execute ? "execute" as const : "dry-run" as const;
   const base = { task_id: opts.taskId, event: "quotation_cancel" as const, mode, company_id: opts.companyId, quotation_id: opts.id };
