@@ -9,6 +9,10 @@
     "./reader": {
       "types": "./dist/src/reader.d.ts",
       "default": "./dist/src/reader.js"
+    },
+    "./writer": {
+      "types": "./dist/src/writer.d.ts",
+      "default": "./dist/src/writer.js"
     }
   },
   "files": [

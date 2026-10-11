@@ -36,10 +36,21 @@ export interface InvoiceCreateResult {
 }
 
 /**
- * 請求書ドラフトを 1 件作成する。dry-run 既定。execute 時のみ POST → 読み戻し GET。
+ * 請求書ドラフトを 1 件作成する（CLI 用: plan は JSON ファイルから読む）。dry-run 既定。execute 時のみ POST → 読み戻し GET。
  */
 export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: InvoiceCreateDeps): Promise<InvoiceCreateResult> {
   const raw: unknown = JSON.parse(await deps.readFile(opts.planPath));
+  return createInvoiceFromPlan(raw, opts, deps);
+}
+
+export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath">;
+export type InvoiceCreateFromPlanDeps = Omit<InvoiceCreateDeps, "readFile">;
+
+/**
+ * plan のオブジェクトから請求書ドラフトを 1 件作成する（CLI と `freee-cli/writer` が共有する唯一の書き込み経路）。
+ * 検査（parseInvoicePlan）・dry-run 既定・POST 状態・読み戻し・audit は CLI と同じ。
+ */
+export async function createInvoiceFromPlan(raw: unknown, opts: InvoiceCreateFromPlanOptions, deps: InvoiceCreateFromPlanDeps): Promise<InvoiceCreateResult> {
   const plan = parseInvoicePlan(raw);
   const totals = computeInvoiceTotals(plan);
   const payload: Record<string, unknown> = { company_id: opts.companyId, ...plan };
@@ -146,7 +157,7 @@ function readCreatedId(json: unknown): number {
   return id;
 }
 
-function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
+export function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
   const inv = (json as { invoice?: Record<string, unknown> } | null)?.invoice;
   if (!inv || inv.id !== id || typeof inv.invoice_number !== "string" || typeof inv.total_amount !== "number") {
     throw new Error("invoice create: read-back response is missing id / invoice_number / total_amount");
@@ -155,7 +166,7 @@ function readCreatedDetail(json: unknown, id: number): InvoiceCreated {
 }
 
 /** audit の書き込み失敗は元の処理の結果を置き換えない（AuditWriteError として投げる。POST 状態と createdId を持つ）。 */
-async function appendAuditSafely(deps: InvoiceCreateDeps, entry: InvoiceAuditEntry, postState: PostState): Promise<void> {
+async function appendAuditSafely(deps: Pick<InvoiceCreateDeps, "appendAudit">, entry: InvoiceAuditEntry, postState: PostState): Promise<void> {
   try {
     await deps.appendAudit(entry);
   } catch (auditErr) {
