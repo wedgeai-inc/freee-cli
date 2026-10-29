@@ -72,3 +72,64 @@ describe("runExportWalletTxns", () => {
     expect(writes.some((w) => w.path.endsWith("wallet-txns.csv") && String(w.data).includes('"source_name","walletable_type"'))).toBe(true);
   });
 });
+
+describe("runExportWalletTxns without walletable", () => {
+  function emptyClient(onUrl: (u: URL) => void) {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      onUrl(new URL(String(url)));
+      return jsonRes({ wallet_txns: [] });
+    });
+    return { fetchMock, client: new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "t", fetchFn: fetchMock }) };
+  }
+  const deps = { ensureDir: async () => {}, writeFile: async () => {} };
+
+  it("口座を省いたら walletable_* をクエリに含めない", async () => {
+    const { client, fetchMock } = emptyClient((u) => {
+      expect(u.searchParams.has("walletable_id")).toBe(false);
+      expect(u.searchParams.has("walletable_type")).toBe(false);
+    });
+    await runExportWalletTxns(
+      { companyId: 1, startDate: "2026-02-01", endDate: "2026-02-28", outDir: "/out", sourceName: "all" },
+      { client, ...deps },
+    );
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("walletable の片方だけなら API を呼ぶ前に拒否する", async () => {
+    const { client, fetchMock } = emptyClient(() => {});
+    await expect(
+      runExportWalletTxns(
+        { companyId: 1, startDate: "2026-02-01", endDate: "2026-02-28", outDir: "/out", sourceName: "x", walletableId: 5 },
+        { client, ...deps },
+      ),
+    ).rejects.toThrow(/walletable/);
+    await expect(
+      runExportWalletTxns(
+        { companyId: 1, startDate: "2026-02-01", endDate: "2026-02-28", outDir: "/out", sourceName: "x", walletableType: "bank_account" },
+        { client, ...deps },
+      ),
+    ).rejects.toThrow(/walletable/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("entrySide を指定したら entry_side を付ける", async () => {
+    const { client } = emptyClient((u) => {
+      expect(u.searchParams.get("entry_side")).toBe("income");
+    });
+    await runExportWalletTxns(
+      { companyId: 1, startDate: "2026-02-01", endDate: "2026-02-28", outDir: "/out", sourceName: "all", entrySide: "income" },
+      { client, ...deps },
+    );
+  });
+
+  it("未知の entrySide は API を呼ぶ前に拒否する", async () => {
+    const { client, fetchMock } = emptyClient(() => {});
+    await expect(
+      runExportWalletTxns(
+        { companyId: 1, startDate: "2026-02-01", endDate: "2026-02-28", outDir: "/out", sourceName: "all", entrySide: "in" as never },
+        { client, ...deps },
+      ),
+    ).rejects.toThrow(/entry/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
