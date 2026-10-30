@@ -73,6 +73,21 @@ describe.each([
   ["invoices", "invoice_number", invoicePlan, runInvoicesCreate],
   ["quotations", "quotation_number", quotationPlan, runQuotationsCreate],
 ] as const)("%s create --number-prefix", (resource, numberKey, plan, run) => {
+  it.each([
+    ["missing date", { partner_id: 10 }, resource === "invoices" ? "invoice plan: billing_date is required (string)" : "quotation plan: quotation_date is required (YYYY-MM-DD)"],
+    ["invalid lines", { ...plan, lines: [{ ...plan.lines[0], quantity: 0 }] }, "invoice plan: lines[0].quantity is required (positive number)"],
+    ["unknown key", { ...plan, unexpected: true }, `${resource === "invoices" ? "invoice" : "quotation"} plan: unexpected is not allowed`],
+    ["both partner identifiers", { ...plan, partner_code: "X1" }, "invoice plan: partner_id and partner_code must not be specified together"],
+  ])("rejects %s with the parser error before authentication or requests", async (_name, input, message) => {
+    const f = fakeFreee(resource, []);
+    const d = deps(f.fetchMock, input);
+    const error = await run({ ...base, execute: false, numberPrefix: "ABC" }, d as never).catch(e => e);
+    expect.soft(d.getClient).not.toHaveBeenCalled();
+    expect.soft(f.fetchMock).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe(message);
+  });
+
   it("dry-run shows the next number in the payload without POST", async () => {
     const f = fakeFreee(resource, ["ABC-001", "ABC-002"]);
     const result = await run({ ...base, execute: false, numberPrefix: "ABC" }, deps(f.fetchMock, plan) as never);
@@ -129,14 +144,14 @@ describe.each([
 
   it.each([
     ["abc", { partner_id: 0, [numberKey]: "" }, /--prefix|--number-prefix/],
-    ["ABC", null, /partner_id/],
-    ["ABC", [], /partner_id/],
+    ["ABC", null, /plan: plan must be a single JSON object/],
+    ["ABC", [], /plan: plan must be a single JSON object/],
     ["ABC", { ...plan, partner_id: 0, [numberKey]: "" }, /partner_id/],
     ["ABC", { ...plan, partner_id: -1 }, /partner_id/],
     ["ABC", { ...plan, partner_id: 1.5 }, /partner_id/],
     ["ABC", { ...plan, partner_id: "10" }, /partner_id/],
     ["ABC", { ...plan, [numberKey]: "" }, /--number-prefix/],
-    ["ABC", { ...plan, [numberKey]: null }, /--number-prefix/],
+    ["ABC", { ...plan, [numberKey]: null }, new RegExp(`plan: ${numberKey} must be a string`)],
     ["ABC", { ...plan, partner_id: undefined, partner_code: "X1" }, /partner_id/],
   ])("CLI validates prefix %s and plan %j before authentication", async (prefix, input, message) => {
     const dir = mkdtempSync(join(tmpdir(), "create-prefix-"));

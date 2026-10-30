@@ -177,7 +177,7 @@ freee invoices create --company-id <company-id> --plan ./plan.json --number-pref
 freee invoices create --company-id <company-id> --plan ./plan.json --number-prefix ABC --execute
 ```
 
-`partner_id`が正の整数であるplanが必要です。`partner_code`だけのplanや、`invoice_number`キーを含むplan（空文字を含む）とは併用できません。取消済みとfreee販売の帳票を含む一覧から次の番号を計算し、同じ接頭辞が別の取引先で使われていれば停止します。dry-runでも認証して一覧を読みます（POSTは行いません）。`--execute`では実行の直前に一覧から計算し直し、dry-runの番号を引き継ぎません。番号は予約しないため、同時に別の帳票を作ると番号がずれうる点に注意してください。
+`partner_id`が正の整数であるplanが必要です。`partner_code`だけのplanや、`invoice_number`キーを含むplan（空文字を含む）とは併用できません。取消済みとfreee販売の帳票を含む一覧から次の番号を計算し、同じ接頭辞が別の取引先で使われていれば停止します。dry-runでも認証して一覧をGETで読みます。帳票への書き込みはしませんが、認証トークンの更新は他の読み取りコマンドと同じく起こりえます。`--execute`では実行の直前に一覧から計算し直し、dry-runの番号を引き継ぎません。番号は予約しないため、同時に別の帳票を作ると番号がずれうる点に注意してください。
 
 
 plan JSON は `POST /invoices` のボディのうち、CLI が対応する項目だけを書いたもの（許可する項目と値は [`src/domain/invoice-plan.ts`](./src/domain/invoice-plan.ts)）。`company_id` と `partner_sending_method`、未知キーは拒否する。API で定義されていても CLI が受け付けない項目・値がある（例: `payment_type` は `transfer` / `direct_debit` のみ）。
@@ -286,7 +286,7 @@ freee quotations create --company-id <company-id> --plan ./quotation-plan.json -
 freee quotations create --company-id <company-id> --plan ./quotation-plan.json --number-prefix ABC --execute
 ```
 
-`partner_id`が正の整数であるplanが必要です。`partner_code`だけのplanや、`quotation_number`キーを含むplan（空文字を含む）とは併用できません。取消済みとfreee販売の帳票を含む一覧から次の番号を計算し、同じ接頭辞が別の取引先で使われていれば停止します。dry-runでも認証して一覧を読みます（POSTは行いません）。`--execute`では実行の直前に一覧から計算し直し、dry-runの番号を引き継ぎません。番号は予約しないため、同時に別の帳票を作ると番号がずれうる点に注意してください。
+`partner_id`が正の整数であるplanが必要です。`partner_code`だけのplanや、`quotation_number`キーを含むplan（空文字を含む）とは併用できません。取消済みとfreee販売の帳票を含む一覧から次の番号を計算し、同じ接頭辞が別の取引先で使われていれば停止します。dry-runでも認証して一覧をGETで読みます。帳票への書き込みはしませんが、認証トークンの更新は他の読み取りコマンドと同じく起こりえます。`--execute`では実行の直前に一覧から計算し直し、dry-runの番号を引き継ぎません。番号は予約しないため、同時に別の帳票を作ると番号がずれうる点に注意してください。
 
 
 plan JSON は `POST /quotations` のボディのうち、CLI が対応する項目だけを書いたものです（`company_id` と `partner_sending_method`、未知キーは拒否）。API で定義されていても、`partner_address_zipcode` などの住所項目は受け付けません。`quotation_date` は必須です（許可する項目は [`src/domain/quotation-plan.ts`](./src/domain/quotation-plan.ts)）。明細の数量・単価・税率の書き方は請求書と同じですが、請求書の明細で使える `sales_date` と `tag_ids` は見積書では使えません。

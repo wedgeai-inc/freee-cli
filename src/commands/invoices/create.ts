@@ -48,6 +48,7 @@ export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: Invoic
   if (opts.numberPrefix !== undefined) validateNumberPrefix(opts.numberPrefix);
   const raw: unknown = JSON.parse(await deps.readFile(opts.planPath));
   if (opts.numberPrefix === undefined) return createInvoiceFromPlan(raw, opts, deps);
+  parseInvoicePlan(raw);
   const numbered = await assignCreateNumber(raw, { companyId: opts.companyId, numberPrefix: opts.numberPrefix }, deps.getClient, "invoices", "invoice_number", PAGINATION_MAX_OFFSET);
   const result = await createInvoiceFromPlan(numbered.raw, opts, { ...deps, getClient: async () => numbered.client });
   return { ...result, assignedNumber: numbered.assignedNumber };

@@ -22,6 +22,7 @@ async function audit(deps: QuotationCreateDeps, entry: QuotationAuditEntry, stat
 function failure(e: unknown) { if (e instanceof ReadBackMismatchError) return `readback_mismatch:${e.field}`; if (e instanceof FreeeApiError) return `api_error:${e.status}:${e.path}`; if (e instanceof ResponseParseError) return `invalid_response:${e.path}`; return "request_failed:/quotations"; }
 export async function runQuotationsCreate(opts: QuotationCreateOptions, deps: QuotationCreateDeps): Promise<QuotationCreateResult> { deps = { ...deps, now: stableClock(deps.now) }; if (opts.numberPrefix !== undefined) validateNumberPrefix(opts.numberPrefix);
   const raw: unknown = JSON.parse(await deps.readFile(opts.planPath));
+  if (opts.numberPrefix !== undefined) parseQuotationPlan(raw);
   const numbered = opts.numberPrefix === undefined ? undefined : await assignCreateNumber(raw, { companyId: opts.companyId, numberPrefix: opts.numberPrefix }, deps.getClient, "quotations", "quotation_number", QUOTATION_PAGINATION_MAX_OFFSET);
   const assignedNumber = numbered?.assignedNumber;
   if (numbered) deps = { ...deps, getClient: async () => numbered.client };
