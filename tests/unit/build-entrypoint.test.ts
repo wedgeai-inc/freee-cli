@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-const PUBLIC_ROOT_COMMANDS = ["auth", "expense", "invoices", "quotations", "companies", "partners", "export"];
+const PUBLIC_ROOT_COMMANDS = ["auth", "expense", "invoices", "quotations", "companies", "partners", "export", "walletables"];
 const REMOVED_COMMANDS = ["review", "register-deal", "apply-pay"];
 
 function commandNames(help: string): string[] {

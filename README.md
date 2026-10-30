@@ -65,6 +65,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 |---|---|
 | `auth login` | 1Password に token を保存する初回認可 |
 | `companies list` | 読み取り |
+| `walletables list` | 読み取り |
 | `partners search` / `get` | 読み取り |
 | `partners create` / `update` | 書き込み（dry-run 既定） |
 | `invoices list` / `get` / `templates` | 読み取り |
@@ -86,6 +87,16 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 ```bash
 freee companies list --format table
 ```
+
+### 口座
+
+```bash
+freee walletables list --company-id <company-id> --format table
+freee walletables list --company-id <company-id> --type bank_account
+```
+
+- `--type` に `bank_account` / `credit_card` / `wallet` を指定すると口座の種類で絞り込む。省略すると全種類を返す。
+- 同期状況と最終同期日時を含める。残高は出さない。
 
 ### 取引先
 
@@ -366,7 +377,7 @@ freee export journals \
 
 ```bash
 freee export wallet-txns \
-  --company-id 1234567 \
+  --company-id <company-id> \
   --month 2026-02 \
   --walletable-type wallet \
   --walletable-id <walletable-id> \
@@ -374,8 +385,19 @@ freee export wallet-txns \
   --out ./tmp/freee-validation/2026-02/card/card-a
 ```
 
+口座を省くと事業所の全口座の明細を書き出す（`--source-name` の既定は `all`）。`--entry-side` で収入または支出だけに絞れる。
+
+```bash
+freee export wallet-txns \
+  --company-id <company-id> \
+  --month 2026-02 \
+  --entry-side income \
+  --out ./tmp/freee-validation/2026-02/wallet-txns
+```
+
 - `<out>/wallet-txns.json` と `<out>/wallet-txns.csv` を保存する。
-- 口座の種類に応じて `--walletable-type` に `bank_account` / `credit_card` / `wallet` を指定する。
+- `--walletable-id` と `--walletable-type` は両方指定するか両方省く。口座の種類は `bank_account` / `credit_card` / `wallet`。
+- `--entry-side` に `income` / `expense` を指定すると収支で絞り込む。
 - すべて GET のみ。明細の登録・更新は行わない。
 
 ### 経費精算申請
