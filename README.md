@@ -396,6 +396,7 @@ freee export wallet-txns \
 ```
 
 - `<out>/wallet-txns.json` と `<out>/wallet-txns.csv` を保存する。
+- 書き出す CSV には明細ごとの残高（`balance` 列）が含まれる。これは口座の残高を出さない `walletables list` とは別である。
 - `--walletable-id` と `--walletable-type` は両方指定するか両方省く。口座の種類は `bank_account` / `credit_card` / `wallet`。
 - `--entry-side` に `income` / `expense` を指定すると収支で絞り込む。
 - すべて GET のみ。明細の登録・更新は行わない。

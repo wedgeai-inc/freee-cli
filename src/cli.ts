@@ -6,11 +6,11 @@ import { OnePasswordTokenStore } from "./lib/one-password-token-store.js";
 import { runOAuthLogin } from "./commands/auth/oauth-login.js";
 import { runExpenseList, formatExpenseList } from "./commands/expense/list.js";
 import { PublicFreeeClient } from "./lib/clients/freee-public-client.js";
-import { parseCompanyId } from "./lib/company-id.js";
+import { parseCompanyId, parsePositiveIntegerOption } from "./lib/company-id.js";
 import { parseMonth } from "./lib/month.js";
 import { runExportReceipts } from "./commands/export/receipts.js";
 import { runExportJournals } from "./commands/export/journals.js";
-import { runExportWalletTxns } from "./commands/export/wallet-txns.js";
+import { runExportWalletTxns, validateExportWalletTxnsOptions } from "./commands/export/wallet-txns.js";
 import { runExportExpenseApplications } from "./commands/export/expense-applications.js";
 import { createInvoiceClient } from "./lib/clients/freee-invoice-client.js";
 import { runInvoicesList, formatInvoicesList, validateInvoicesListOptions, type InvoicesListOptions } from "./commands/invoices/list.js";
@@ -36,7 +36,7 @@ import { runPartnersGet, formatPartnerGet } from "./commands/partners/get.js";
 import { runPartnersUpdate, formatPartnerUpdate } from "./commands/partners/update.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { formatCompaniesList, runCompaniesList } from "./commands/companies/list.js";
-import { formatWalletablesList, runWalletablesList, type WalletableType } from "./commands/walletables/list.js";
+import { formatWalletablesList, runWalletablesList, validateWalletablesListOptions, type WalletableType } from "./commands/walletables/list.js";
 import { formatPartnersSearch, runPartnersSearch } from "./commands/partners/search.js";
 import { mkdir, writeFile as fsWriteFile } from "node:fs/promises";
 
@@ -276,6 +276,7 @@ export function createProgram(): Command {
     .option("--format <format>", "output format: json or table", "json")
     .action(async (opts) => {
       const companyId = parseCompanyId(opts.companyId);
+      validateWalletablesListOptions({ type: opts.type });
       const auth = await loadPublicApiAuth();
       const client = new PublicFreeeClient({
         baseUrl: "https://api.freee.co.jp",
@@ -477,6 +478,15 @@ export function createProgram(): Command {
     .option("--end-date <YYYY-MM-DD>", "end date (overrides --month end)")
     .action(async (opts) => {
       const { startDate, endDate } = resolveDateRange(opts);
+      const walletableId =
+        opts.walletableId === undefined
+          ? undefined
+          : parsePositiveIntegerOption(opts.walletableId, "--walletable-id");
+      validateExportWalletTxnsOptions({
+        walletableId,
+        walletableType: opts.walletableType,
+        entrySide: opts.entrySide,
+      });
       const auth = await loadPublicApiAuth();
       const client = new PublicFreeeClient({
         baseUrl: "https://api.freee.co.jp",
@@ -488,7 +498,7 @@ export function createProgram(): Command {
           startDate,
           endDate,
           outDir: opts.out,
-          walletableId: opts.walletableId === undefined ? undefined : parseCompanyId(opts.walletableId),
+          walletableId,
           walletableType: opts.walletableType,
           sourceName: opts.sourceName,
           entrySide: opts.entrySide as "income" | "expense" | undefined,
