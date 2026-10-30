@@ -27,8 +27,11 @@ export interface WalletablesListResult {
 
 /** API 応答から Summary の項目だけを取り出す（未定義フィールドを JSON 出力へ素通ししない）。 */
 function toWalletableSummary(raw: Record<string, unknown>): WalletableSummary {
+  if (typeof raw.id !== "number" || !Number.isSafeInteger(raw.id) || raw.id <= 0) {
+    throw new Error(`walletable id in API response must be a positive integer (got: "${String(raw.id)}")`);
+  }
   const item: WalletableSummary = {
-    id: Number(raw.id),
+    id: raw.id,
     type: String(raw.type ?? ""),
     name: String(raw.name ?? ""),
   };
@@ -37,13 +40,23 @@ function toWalletableSummary(raw: Record<string, unknown>): WalletableSummary {
   return item;
 }
 
+/** タブ・CR・LF を半角空白 1 つにする。CRLF は 1 つの空白にする。 */
+function tableCell(value: string | number): string {
+  return String(value).replaceAll(/\r\n|[\t\r\n]/g, " ");
+}
+
+/** 入力検証。CLI では認証ロード（token refresh の fetch を伴いうる）より前に呼ぶ。 */
+export function validateWalletablesListOptions(opts: Pick<WalletablesListOptions, "type">): void {
+  if (opts.type !== undefined && !(WALLETABLE_TYPES as readonly string[]).includes(opts.type)) {
+    throw new Error(`type must be bank_account, credit_card, or wallet (got: "${opts.type}")`);
+  }
+}
+
 export async function runWalletablesList(
   opts: WalletablesListOptions,
   deps: WalletablesListDeps,
 ): Promise<WalletablesListResult> {
-  if (opts.type !== undefined && !(WALLETABLE_TYPES as readonly string[]).includes(opts.type)) {
-    throw new Error(`type must be bank_account, credit_card, or wallet (got: "${opts.type}")`);
-  }
+  validateWalletablesListOptions(opts);
 
   const query: Record<string, string | number | boolean | null | undefined> = {
     company_id: opts.companyId,
@@ -63,9 +76,10 @@ export function formatWalletablesList(result: WalletablesListResult, format: "js
   }
   return [
     "id\ttype\tname\tsync_status\tlast_synced_at",
-    ...result.items.map(
-      (item) =>
-        `${item.id}\t${item.type}\t${item.name}\t${item.sync_status ?? ""}\t${item.last_synced_at ?? ""}`,
+    ...result.items.map((item) =>
+      [item.id, item.type, item.name, item.sync_status ?? "", item.last_synced_at ?? ""]
+        .map(tableCell)
+        .join("\t"),
     ),
   ].join("\n");
 }

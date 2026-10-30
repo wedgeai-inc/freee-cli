@@ -64,21 +64,20 @@ function stringifyWalletTxnsCsv(rows: Array<WalletTxnSummary & { source_name: st
   ].join("\n")}\n`;
 }
 
-/**
- * freee wallet/card 明細を public API から read-only export する。
- *
- * 口座の種類（wallet / credit_card / bank_account）と ID は任意で、両方指定するか両方省く。
- * 口座を省いたときは walletable_id / walletable_type をクエリに付けない。
- * entrySide（income / expense）を指定すると収支で絞り込む。
- */
-export async function runExportWalletTxns(
-  opts: ExportWalletTxnsOptions,
-  deps: ExportWalletTxnsDeps,
-): Promise<ExportWalletTxnsResult> {
+/** 入力検証。CLI では認証ロード（token refresh の fetch を伴いうる）より前に呼ぶ。 */
+export function validateExportWalletTxnsOptions(
+  opts: Pick<ExportWalletTxnsOptions, "walletableId" | "walletableType" | "entrySide">,
+): void {
   const hasWalletableId = opts.walletableId !== undefined;
   const hasWalletableType = opts.walletableType !== undefined;
   if (hasWalletableId !== hasWalletableType) {
     throw new Error("walletable id and type must both be specified or both omitted");
+  }
+  if (
+    opts.walletableId !== undefined &&
+    !(Number.isSafeInteger(opts.walletableId) && opts.walletableId > 0)
+  ) {
+    throw new Error(`walletable id must be a positive integer (got: "${String(opts.walletableId)}")`);
   }
   if (
     hasWalletableType &&
@@ -91,6 +90,23 @@ export async function runExportWalletTxns(
   if (opts.entrySide !== undefined && !(ENTRY_SIDES as readonly string[]).includes(opts.entrySide)) {
     throw new Error(`entry side must be income or expense (got: "${opts.entrySide}")`);
   }
+}
+
+/**
+ * freee wallet/card 明細を public API から read-only export する。
+ *
+ * 口座の種類（wallet / credit_card / bank_account）と ID は任意で、両方指定するか両方省く。
+ * 口座を省いたときは walletable_id / walletable_type をクエリに付けない。
+ * entrySide（income / expense）を指定すると収支で絞り込む。
+ */
+export async function runExportWalletTxns(
+  opts: ExportWalletTxnsOptions,
+  deps: ExportWalletTxnsDeps,
+): Promise<ExportWalletTxnsResult> {
+  validateExportWalletTxnsOptions(opts);
+
+  const hasWalletableId = opts.walletableId !== undefined;
+  const hasWalletableType = opts.walletableType !== undefined;
 
   await deps.ensureDir(opts.outDir);
 
