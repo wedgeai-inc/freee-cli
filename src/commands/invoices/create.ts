@@ -1,3 +1,6 @@
+import { validateNumberPrefix } from "../../lib/next-number.js";
+import { assignCreateNumber, formatAssignedNumber, type AssignedNumber } from "../../lib/create-number-prefix.js";
+import { PAGINATION_MAX_OFFSET } from "./list.js";
 import { stableClock } from "../../lib/clock.js";
 import type { PublicFreeeClient } from "../../lib/clients/freee-public-client.js";
 import { FreeeApiError } from "../../lib/clients/freee-public-client.js";
@@ -9,13 +12,14 @@ import { computeInvoiceTotals, parseInvoicePlan, type InvoiceTotals } from "../.
 export interface InvoiceCreateOptions {
   companyId: number;
   planPath: string;
+  numberPrefix?: string;
   execute: boolean;
   logDir: string;
   taskId: string;
 }
 
 export interface InvoiceCreateDeps {
-  /** execute 時にだけ呼ぶ。dry-run では認証もネットワークも発生させない */
+  /** execute時、または--number-prefix指定の一覧読み取り時に呼ぶ */
   getClient: () => Promise<PublicFreeeClient>;
   readFile: (path: string) => Promise<string>;
   appendAudit: (entry: InvoiceAuditEntry) => Promise<void>;
@@ -34,17 +38,22 @@ export interface InvoiceCreateResult {
   payload: Record<string, unknown>;
   totals: InvoiceTotals;
   created?: InvoiceCreated;
+  assignedNumber?: AssignedNumber;
 }
 
 /**
  * 請求書ドラフトを 1 件作成する（CLI 用: plan は JSON ファイルから読む）。dry-run 既定。execute 時のみ POST → 読み戻し GET。
  */
 export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: InvoiceCreateDeps): Promise<InvoiceCreateResult> { deps = { ...deps, now: stableClock(deps.now) };
+  if (opts.numberPrefix !== undefined) validateNumberPrefix(opts.numberPrefix);
   const raw: unknown = JSON.parse(await deps.readFile(opts.planPath));
-  return createInvoiceFromPlan(raw, opts, deps);
+  if (opts.numberPrefix === undefined) return createInvoiceFromPlan(raw, opts, deps);
+  const numbered = await assignCreateNumber(raw, { companyId: opts.companyId, numberPrefix: opts.numberPrefix }, deps.getClient, "invoices", "invoice_number", PAGINATION_MAX_OFFSET);
+  const result = await createInvoiceFromPlan(numbered.raw, opts, { ...deps, getClient: async () => numbered.client });
+  return { ...result, assignedNumber: numbered.assignedNumber };
 }
 
-export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath"> & {
+export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath" | "numberPrefix"> & {
   /** 指定すると、読み戻した合計金額（freee の確定値）がこの値と一致しなければ成功にしない。CLI は参考値の丸め差があり得るため渡さない */
   expectedTotal?: number;
 };
@@ -242,6 +251,7 @@ export function formatInvoiceCreate(result: InvoiceCreateResult): string {
     `mode: ${result.mode}`,
     `参考値（確定値は freee の応答を正とする）: 小計 ${result.totals.subtotal} / 消費税 ${result.totals.tax} / 合計 ${result.totals.total}`,
   ];
+  if (result.assignedNumber) lines.push(formatAssignedNumber(result.assignedNumber));
   if (result.created) {
     lines.push(
       `created: id=${result.created.id} invoice_number=${result.created.invoice_number} total_amount=${result.created.total_amount}`,

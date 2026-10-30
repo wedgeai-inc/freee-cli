@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { createProgram } from "../../src/cli.js";
+import * as auth from "../../src/lib/token-config-loader.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInvoiceClient } from "../../src/lib/clients/freee-invoice-client.js";
-import { runInvoicesCreate } from "../../src/commands/invoices/create.js";
-import { runQuotationsCreate } from "../../src/commands/quotations/create.js";
+import { InvoiceCreatedButUnverifiedError, formatInvoiceCreate, runInvoicesCreate } from "../../src/commands/invoices/create.js";
+import { QuotationCreatedButUnverifiedError, formatQuotationCreate, runQuotationsCreate } from "../../src/commands/quotations/create.js";
 
 const invoicePlan = {
   billing_date: "2026-10-31",
@@ -79,7 +84,7 @@ describe.each([
     const f = fakeFreee(resource, ["ABC-001"]);
     const result = await run({ ...base, execute: true, numberPrefix: "ABC" }, deps(f.fetchMock, plan) as never);
     expect(f.posted()?.[numberKey]).toBe("ABC-002");
-    expect(result.created?.[numberKey as "invoice_number"]).toBe("ABC-002");
+    expect((result.created as { invoice_number?: string; quotation_number?: string } | undefined)?.[numberKey]).toBe("ABC-002");
   });
 
   it("rejects a plan that already has a number, before any request", async () => {
@@ -101,6 +106,98 @@ describe.each([
     const f = fakeFreee(resource, []);
     await expect(run({ ...base, execute: false, numberPrefix: "abc" }, deps(f.fetchMock, plan) as never)).rejects.toThrow(/--prefix|--number-prefix/);
     expect(f.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different read-back number as created but unverified", async () => {
+    const f = fakeFreee(resource, ["ABC-001"]);
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const response = await f.fetchMock(input, init);
+      if (new URL(String(input)).pathname.endsWith(`/${resource}/900`)) {
+        const detail = await response.json() as Record<string, Record<string, unknown>>;
+        detail[resource === "invoices" ? "invoice" : "quotation"]![numberKey] = "ABC-999";
+        return json(detail);
+      }
+      return response;
+    });
+    const d = deps(fetchMock, plan);
+    const error = await run({ ...base, execute: true, numberPrefix: "ABC" }, d as never).catch(e => e);
+    expect(error).toBeInstanceOf(resource === "invoices" ? InvoiceCreatedButUnverifiedError : QuotationCreatedButUnverifiedError);
+    expect(error).toMatchObject({ createdId: 900, postState: "succeeded", reason: `readback_mismatch:${numberKey}` });
+    expect(d.appendAudit).toHaveBeenCalledWith(expect.objectContaining({ status: "failed", created_id: 900, reason: `readback_mismatch:${numberKey}` }));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it.each([
+    ["abc", { partner_id: 0, [numberKey]: "" }, /--prefix|--number-prefix/],
+    ["ABC", null, /partner_id/],
+    ["ABC", [], /partner_id/],
+    ["ABC", { ...plan, partner_id: 0, [numberKey]: "" }, /partner_id/],
+    ["ABC", { ...plan, partner_id: -1 }, /partner_id/],
+    ["ABC", { ...plan, partner_id: 1.5 }, /partner_id/],
+    ["ABC", { ...plan, partner_id: "10" }, /partner_id/],
+    ["ABC", { ...plan, [numberKey]: "" }, /--number-prefix/],
+    ["ABC", { ...plan, [numberKey]: null }, /--number-prefix/],
+    ["ABC", { ...plan, partner_id: undefined, partner_code: "X1" }, /partner_id/],
+  ])("CLI validates prefix %s and plan %j before authentication", async (prefix, input, message) => {
+    const dir = mkdtempSync(join(tmpdir(), "create-prefix-"));
+    const path = join(dir, "plan.json");
+    writeFileSync(path, JSON.stringify(input));
+    const loadAuth = vi.spyOn(auth, "loadApiAuth").mockRejectedValue(new Error("authentication must not run"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const program = createProgram().exitOverride().configureOutput({ writeErr: () => {} });
+      await expect(program.parseAsync([resource, "create", "--company-id", "1", "--plan", path, "--number-prefix", prefix, "--execute"], { from: "user" })).rejects.toThrow(message);
+      expect(loadAuth).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      loadAuth.mockRestore();
+      vi.unstubAllGlobals();
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("rejects a matching prefix belonging to another partner without POST", async () => {
+    const f = fakeFreee(resource, []);
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith(`/${resource}`)) return json({ [resource]: [{ id: 1, [numberKey]: "ABC-001", partner_id: 11 }] });
+      return f.fetchMock(input, init);
+    });
+    await expect(run({ ...base, execute: true, numberPrefix: "ABC" }, deps(fetchMock, plan) as never)).rejects.toThrow(/different partner/);
+    expect(fetchMock.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
+    expect(f.posted()).toBeUndefined();
+  });
+
+  it("recomputes after a dry-run when another document has been created", async () => {
+    const existing = ["ABC-001"];
+    const f = fakeFreee(resource, existing);
+    const d = deps(f.fetchMock, plan);
+    const dryRun = await run({ ...base, execute: false, numberPrefix: "ABC" }, d as never);
+    expect(dryRun.payload[numberKey]).toBe("ABC-002");
+    existing.push("ABC-002");
+    const executed = await run({ ...base, execute: true, numberPrefix: "ABC" }, d as never);
+    expect(f.posted()?.[numberKey]).toBe("ABC-003");
+    expect(executed.assignedNumber).toEqual({ prefix: "ABC", number: "ABC-003", max: 2, matched_count: 2 });
+    const formatted = resource === "invoices" ? formatInvoiceCreate(executed as never) : formatQuotationCreate(executed as never);
+    expect(formatted).toContain("number: ABC-003（--number-prefix で自動採番。一致 2 件・最大 2）");
+    expect(d.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "created", payload_redacted: expect.objectContaining({ [numberKey]: "ABC-003" }) }));
+  });
+
+  it("reports an empty sequence with max null", async () => {
+    const f = fakeFreee(resource, []);
+    const result = await run({ ...base, execute: false, numberPrefix: "ABC" }, deps(f.fetchMock, plan) as never);
+    expect(result.assignedNumber).toEqual({ prefix: "ABC", number: "ABC-001", max: null, matched_count: 0 });
+    const formatted = resource === "invoices" ? formatInvoiceCreate(result as never) : formatQuotationCreate(result as never);
+    expect(formatted).toContain("number: ABC-001（--number-prefix で自動採番。一致 0 件・最大 なし）");
+  });
+
+  it("validates an invalid prefix before reading a malformed plan", async () => {
+    const f = fakeFreee(resource, []);
+    const d = { ...deps(f.fetchMock, plan), readFile: vi.fn(async () => "{broken") };
+    await expect(run({ ...base, execute: false, numberPrefix: "abc" }, d as never)).rejects.toThrow(/--prefix|--number-prefix/);
+    expect(d.readFile).not.toHaveBeenCalled();
+    expect(d.getClient).not.toHaveBeenCalled();
   });
 
   it("keeps the existing behaviour when --number-prefix is not given (dry-run makes no request)", async () => {
