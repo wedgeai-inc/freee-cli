@@ -65,7 +65,7 @@ export async function readNumberedDocuments(
         throw new Error(`${resource} next-number: limit + offset exceeds ${maxOffset}; cannot compute from incomplete results`);
       }
       const response = await deps.client.get(`/${resource}`, {
-        query: { company_id: opts.companyId, cancel_status: cancelStatus, limit, offset },
+        query: { company_id: opts.companyId, cancel_status: cancelStatus, sales_management_origin: true, limit, offset },
       });
       const payload: unknown = await response.json();
       const page = payload && typeof payload === "object" ? (payload as Record<string, unknown>)[resource] : undefined;

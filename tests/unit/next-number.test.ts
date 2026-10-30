@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { computeNextNumber, validateNumberPrefix } from "../../src/lib/next-number.js";
 import { runInvoicesNextNumber } from "../../src/commands/invoices/next-number.js";
 import { runQuotationsNextNumber } from "../../src/commands/quotations/next-number.js";
@@ -87,6 +87,19 @@ describe.each([
   ["quotations", "quotation_number", runQuotationsNextNumber],
 ] as const)("%s next-number boundaries", (resource, numberKey, run) => {
   const raw = (id = 1) => ({ id, [numberKey]: `ABC-${String(id).padStart(3, "0")}`, partner_id: 10 });
+  it("counts sales-management-origin documents when computing the next number", async () => {
+    const get = vi.fn(async (_path, init) => jsonRes({
+      [resource]: init.query.sales_management_origin === true ? [raw(1), raw(2)] : [raw(1)],
+    }));
+    const result = await run({ companyId: 1, prefix: "ABC", partnerId: 10 }, { client: { get } });
+    expect(result.next).toBe("ABC-003");
+  });
+  it("rejects sales-management-origin documents belonging to a different partner", async () => {
+    const get = vi.fn(async (_path, init) => jsonRes({
+      [resource]: init.query.sales_management_origin === true ? [raw(1), { ...raw(2), partner_id: 11 }] : [raw(1)],
+    }));
+    await expect(run({ companyId: 1, prefix: "ABC", partnerId: 10 }, { client: { get } })).rejects.toThrow(/partner/);
+  });
   it("pages each state independently and never filters by partner", async () => {
     const get = vi.fn(async (path, init) => {
       expect(path).toBe(`/${resource}`);
@@ -102,6 +115,10 @@ describe.each([
     expect(get.mock.calls.map(([, init]) => [init.query.cancel_status, init.query.offset])).toEqual([
       ["canceled", 0], ["canceled", 100], ["uncanceled", 0], ["uncanceled", 100],
     ]);
+    expect(get).toHaveBeenCalledTimes(4);
+    for (const [, init] of get.mock.calls) {
+      expect(init.query).toHaveProperty("sales_management_origin", true);
+    }
   });
   it("stops before exceeding the cap without returning partial results", async () => {
     const get = vi.fn(async () => jsonRes({ [resource]: Array.from({ length: 100 }, (_, i) => raw(i + 1)) }));
@@ -148,11 +165,14 @@ describe("additional number calculation cases", () => {
 });
 
 describe.each(["invoices", "quotations"])("%s next-number CLI", (resource) => {
+  let createProgram: typeof import("../../src/cli.js").createProgram;
+  beforeAll(async () => {
+    ({ createProgram } = await import("../../src/cli.js"));
+  });
   it.each([
     ["--prefix", "abc"], ["--company-id", "0"], ["--partner-id", "0"],
     ["--width", "0"], ["--width", "11"], ["--width", "1.5"], ["--width", "1e1"], ["--format", "csv"],
   ])("validates %s=%s before authentication", async (flag, value) => {
-    const { createProgram } = await import("../../src/cli.js");
     const previous = process.env.FREEE_ACCESS_TOKEN;
     process.env.FREEE_ACCESS_TOKEN = "";
     try {
@@ -164,7 +184,6 @@ describe.each(["invoices", "quotations"])("%s next-number CLI", (resource) => {
     }
   });
   it.each(["json", "table"])("prints %s using GET only", async (format) => {
-    const { createProgram } = await import("../../src/cli.js");
     const previous = process.env.FREEE_ACCESS_TOKEN;
     process.env.FREEE_ACCESS_TOKEN = "test-token";
     const fetchMock = vi.fn(async () => jsonRes({ [resource]: [] }));
