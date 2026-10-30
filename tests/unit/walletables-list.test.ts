@@ -9,8 +9,8 @@ function jsonRes(body: unknown): Response {
   });
 }
 
-function clientWith(fetchMock: ReturnType<typeof vi.fn>): PublicFreeeClient {
-  return new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "t", fetchFn: fetchMock });
+function clientWith(fetchMock: typeof fetch | ReturnType<typeof vi.fn>): PublicFreeeClient {
+  return new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "t", fetchFn: fetchMock as typeof fetch });
 }
 
 describe("runWalletablesList", () => {

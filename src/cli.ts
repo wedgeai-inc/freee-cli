@@ -36,6 +36,7 @@ import { runPartnersGet, formatPartnerGet } from "./commands/partners/get.js";
 import { runPartnersUpdate, formatPartnerUpdate } from "./commands/partners/update.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { formatCompaniesList, runCompaniesList } from "./commands/companies/list.js";
+import { formatWalletablesList, runWalletablesList, type WalletableType } from "./commands/walletables/list.js";
 import { formatPartnersSearch, runPartnersSearch } from "./commands/partners/search.js";
 import { mkdir, writeFile as fsWriteFile } from "node:fs/promises";
 
@@ -266,6 +267,28 @@ export function createProgram(): Command {
       console.log(formatCompaniesList(result, format));
     });
 
+  const walletables = program.command("walletables").description("read-only walletable operations");
+  walletables
+    .command("list")
+    .description("list walletables")
+    .requiredOption("--company-id <id>", "freee company ID")
+    .option("--type <type>", "walletable type: bank_account, credit_card, wallet")
+    .option("--format <format>", "output format: json or table", "json")
+    .action(async (opts) => {
+      const companyId = parseCompanyId(opts.companyId);
+      const auth = await loadPublicApiAuth();
+      const client = new PublicFreeeClient({
+        baseUrl: "https://api.freee.co.jp",
+        token: auth.accessToken,
+      });
+      const format = opts.format === "table" ? "table" : "json";
+      const result = await runWalletablesList(
+        { companyId, type: opts.type as WalletableType | undefined },
+        { client },
+      );
+      console.log(formatWalletablesList(result, format));
+    });
+
   const partners = program.command("partners").description("partner read and write operations");
   partners
     .command("search")
@@ -445,9 +468,10 @@ export function createProgram(): Command {
     .description("export wallet/card transactions for a period as JSON and CSV")
     .requiredOption("--company-id <id>", "freee company ID")
     .requiredOption("--out <dir>", "output directory")
-    .requiredOption("--walletable-id <id>", "freee walletable ID")
-    .requiredOption("--walletable-type <type>", "walletable type: wallet, credit_card, bank_account")
-    .requiredOption("--source-name <name>", "source label to embed in output, e.g. card-a")
+    .option("--walletable-id <id>", "freee walletable ID")
+    .option("--walletable-type <type>", "walletable type: wallet, credit_card, bank_account")
+    .option("--source-name <name>", "source label to embed in output, e.g. card-a", "all")
+    .option("--entry-side <side>", "filter by entry side: income or expense")
     .option("--month <YYYY-MM>", "target month (sets start/end of month)")
     .option("--start-date <YYYY-MM-DD>", "start date (overrides --month start)")
     .option("--end-date <YYYY-MM-DD>", "end date (overrides --month end)")
@@ -464,9 +488,10 @@ export function createProgram(): Command {
           startDate,
           endDate,
           outDir: opts.out,
-          walletableId: parseCompanyId(opts.walletableId),
+          walletableId: opts.walletableId === undefined ? undefined : parseCompanyId(opts.walletableId),
           walletableType: opts.walletableType,
           sourceName: opts.sourceName,
+          entrySide: opts.entrySide as "income" | "expense" | undefined,
         },
         { client, ...fsDeps },
       );
