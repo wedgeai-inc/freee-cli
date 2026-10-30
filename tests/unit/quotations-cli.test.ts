@@ -16,6 +16,10 @@ async function parse(argv: string[], fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 describe("quotations CLI entrypoints", () => {
+  it("registers next-number last", () => {
+    expect(createProgram().commands.find((command) => command.name() === "quotations")?.commands.map((command) => command.name()))
+      .toEqual(["list", "get", "templates", "create", "cancel", "uncancel", "next-number"]);
+  });
   it("list forwards whitespace-sensitive filters unchanged", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ quotations: [] }));
     await parse(["quotations", "list", "--company-id", "1", "--quotation-number", " Q 1 ", "--subject", " subject with spaces ", "--partner-ids", "1,2", "--sales-management-origin"], fetchMock);
