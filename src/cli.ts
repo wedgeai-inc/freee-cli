@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import { runInvoicesNextNumber } from "./commands/invoices/next-number.js";
+import { runQuotationsNextNumber } from "./commands/quotations/next-number.js";
+import { validateNumberPrefix } from "./lib/next-number.js";
 import { isMainModule } from "./lib/main-module.js";
 import { loadApiAuth } from "./lib/token-config-loader.js";
 import { OnePasswordTokenStore } from "./lib/one-password-token-store.js";
@@ -250,6 +253,29 @@ export function createProgram(): Command {
   quotations.command("create").requiredOption("--company-id <id>").requiredOption("--plan <path>").option("--execute").option("--log-dir <path>", "audit log output directory", "./audit-logs").option("--task-id <id>", "task ID", "freee-quotation-create").action(async (opts) => { const result = await runQuotationsCreate({ companyId: parseCompanyId(opts.companyId), planPath: opts.plan, execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId }, { getClient: async () => { const auth = await loadPublicApiAuth(); return createInvoiceClient({ token: auth.accessToken }); }, readFile: (p) => fsReadFile(p, "utf8"), appendAudit: (entry) => appendQuotationAudit(opts.logDir, entry), now: () => new Date() }); console.log(formatQuotationCreate(result)); });
   quotations.command("cancel").requiredOption("--company-id <id>").requiredOption("--id <id>").option("--expect-quotation-number <number>").option("--execute").option("--log-dir <path>", "audit log output directory", "./audit-logs").option("--task-id <id>", "task ID", "freee-quotation-cancel").action(async (opts) => { const id = parseInvoiceId(opts.id); validateQuotationId(id); const result = await runQuotationsCancel({ companyId: parseCompanyId(opts.companyId), id, execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId, expectQuotationNumber: opts.expectQuotationNumber }, { getClient: async () => { const auth = await loadPublicApiAuth(); return createInvoiceClient({ token: auth.accessToken }); }, appendAudit: (entry) => appendQuotationCancelAudit(opts.logDir, entry), now: () => new Date() }); console.log(formatQuotationCancel(result)); });
   quotations.command("uncancel").requiredOption("--company-id <id>").requiredOption("--id <id>").option("--expect-quotation-number <number>").option("--execute").option("--log-dir <path>", "audit log output directory", "./audit-logs").option("--task-id <id>", "task ID", "freee-quotation-uncancel").action(async (opts) => { const companyId = parseCompanyId(opts.companyId); const id = parseInvoiceId(opts.id); validateQuotationId(id); const result = await runQuotationsUncancel({ companyId, id, execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId, expectQuotationNumber: opts.expectQuotationNumber }, { getClient: async () => { const auth = await loadPublicApiAuth(); return createInvoiceClient({ token: auth.accessToken }); }, appendAudit: (entry) => appendQuotationUncancelAudit(opts.logDir, entry), now: () => new Date() }); console.log(formatQuotationUncancel(result)); });
+
+  for (const [parent, run] of [[invoices, runInvoicesNextNumber], [quotations, runQuotationsNextNumber]] as const) {
+    parent.command("next-number")
+      .description("compute the next number from existing documents (read-only)")
+      .requiredOption("--company-id <id>", "freee company ID")
+      .requiredOption("--prefix <prefix>", "number prefix, e.g. ABC")
+      .option("--partner-id <id>", "expected partner ID")
+      .option("--width <n>", "minimum number width (1–10)")
+      .option("--format <format>", "output format: json or table", "json")
+      .action(async (opts) => {
+        const companyId = parseCompanyId(opts.companyId);
+        validateNumberPrefix(opts.prefix);
+        const partnerId = opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id");
+        const width = opts.width === undefined ? undefined : parsePositiveIntegerOption(opts.width, "--width");
+        if (width !== undefined && width > 10) throw new Error("--width must be an integer from 1 to 10");
+        if (opts.format !== "json" && opts.format !== "table") throw new Error("--format must be json or table");
+        const auth = await loadPublicApiAuth();
+        const result = await run({ companyId, prefix: opts.prefix, partnerId, width }, { client: createInvoiceClient({ token: auth.accessToken }) });
+        console.log(opts.format === "table"
+          ? `next\tmax\tmatched_count\n${result.next}\t${result.max ?? ""}\t${result.matched.length}`
+          : JSON.stringify(result, null, 2));
+      });
+  }
 
   const companies = program.command("companies").description("read-only company operations");
   companies

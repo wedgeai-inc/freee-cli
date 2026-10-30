@@ -35,7 +35,7 @@ describe("invoice read commands", () => {
   it("registers list, get, and templates as invoices subcommands", () => {
     const invoices = createProgram().commands.find((command) => command.name() === "invoices");
 
-    expect(invoices?.commands.map((command) => command.name())).toEqual(["list", "get", "templates", "create", "cancel", "update", "uncancel"]);
+    expect(invoices?.commands.map((command) => command.name())).toEqual(["list", "get", "templates", "create", "cancel", "update", "uncancel", "next-number"]);
     expect(invoices?.commands.find((command) => command.name() === "list")?.options.map((option) => option.long)).toContain("--company-id");
     expect(invoices?.commands.find((command) => command.name() === "get")?.options.map((option) => option.long)).toContain("--id");
   });
