@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { appendAccountingAudit } from "../../src/lib/audit/accounting-audit.js";
 import { appendDealAudit } from "../../src/lib/audit/deal-audit.js";
 import { appendReceiptAudit } from "../../src/lib/audit/receipt-audit.js";
 
@@ -10,9 +11,11 @@ it("JSONLの自由記述・名前・credentialをマスクし、証憑本文と�
   try {
     const base = { timestamp: "2026-01-15T00:00:00.000Z", task_id: "sample", mode: "dry-run" as const, status: "planned" as const, company_id: 1, payload_redacted: { description: "架空摘要", receipt_metadatum_issue_date: "2026-01-15", ref_number: "private-reference", name: "架空氏名", authorization: "Bearer fictional-secret", details: [{ description: "private-detail", amount: 1500 }] } };
     await appendDealAudit(dir, { ...base, event: "deal_create" });
+    await appendAccountingAudit(dir, { ...base, event: "deal_payment_create", target_id: 6 });
     await appendReceiptAudit(dir, { ...base, event: "receipt_upload", filename: "sample.pdf", sha256: "a".repeat(64) });
     const files = await readdir(dir);
-    expect(files).toHaveLength(2);
+    expect(files).toHaveLength(3);
+    expect(files).toContain("freee-deal-payment-create-2026-01-15.jsonl");
     for (const file of files) {
       const text = await readFile(join(dir, file), "utf8");
       expect(text.endsWith("\n")).toBe(true);

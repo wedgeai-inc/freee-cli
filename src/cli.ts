@@ -9,6 +9,7 @@ import { loadApiAuth } from "./lib/token-config-loader.js";
 import { OnePasswordTokenStore } from "./lib/one-password-token-store.js";
 import { runOAuthLogin } from "./commands/auth/oauth-login.js";
 import { runExpenseList, formatExpenseList } from "./commands/expense/list.js";
+import { createReadOnlyClient } from "./lib/clients/read-only-client.js";
 import { PublicFreeeClient } from "./lib/clients/freee-public-client.js";
 import { parseCompanyId, parsePositiveIntegerOption } from "./lib/company-id.js";
 import { parseMonth } from "./lib/month.js";
@@ -61,7 +62,11 @@ export function createProgram(): Command {
   program.name("freee").description("Unofficial CLI for the freee public API").option("--profile <name>", "OAuth profile");
   const loadPublicApiAuth = () => loadApiAuth({ profile: program.opts<{ profile?: string }>().profile });
 
-  registerAccountingCommands(program, async () => new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: (await loadPublicApiAuth()).accessToken }));
+  registerAccountingCommands(
+    program,
+    async () => new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: (await loadPublicApiAuth()).accessToken }),
+    async () => createReadOnlyClient({ api: "accounting", token: (await loadPublicApiAuth()).accessToken }),
+  );
 
   const auth = program.command("auth").description("OAuth authentication");
   auth

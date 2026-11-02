@@ -66,6 +66,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `auth login` | 1Password に token を保存する初回認可 |
 | `companies list` | 読み取り |
 | `walletables list` | 読み取り |
+| `wallet-txns list` | 読み取り（口座明細） |
 | `partners search` / `get` | 読み取り |
 | `partners create` / `update` | 書き込み（dry-run 既定） |
 | `invoices list` / `get` / `templates` | 読み取り |
@@ -76,13 +77,14 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `deals list` / `get <id>` | 読み取り |
 | `receipts get <id>` | 読み取り |
 | `deals create` | 書き込み（dry-run既定） |
+| `deals payments create <deal-id>` | 書き込み（dry-run既定） |
 | `receipts upload` | 書き込み（dry-run既定） |
 | `expense list` | 読み取り |
 | `export receipts` / `journals` / `wallet-txns` / `expense-applications` | 読み取り（ローカルへ保存） |
 
 共通のオプション:
 
-- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get`と`account-items`・`taxes`・`deals`・`receipts`はJSON固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
+- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get`と`account-items`・`taxes`・`deals`・`receipts`・`wallet-txns`はJSON固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
 - `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）
 - `--task-id <id>`: audit log に記録する task ID
 - `--profile <name>`: 1Password 管理の OAuth で使う profile（`FREEE_OAUTH_PROFILE` でも指定可）
@@ -102,6 +104,19 @@ freee walletables list --company-id <company-id> --type bank_account
 
 - `--type` に `bank_account` / `credit_card` / `wallet` を指定すると口座の種類で絞り込む。省略すると全種類を返す。
 - 同期状況と最終同期日時を含める。残高は出さない。
+
+#### 口座明細の一覧
+
+```bash
+freee wallet-txns list --company-id 1
+freee wallet-txns list --company-id 1 --walletable-type bank_account --walletable-id 2 \
+  --start-date 2026-01-01 --end-date 2026-01-31 --entry-side income \
+  --sort-type created_at_desc --limit 100 --offset 0
+```
+
+上のIDは架空です。`--walletable-type`（`bank_account|credit_card|wallet`）と`--walletable-id`は両方指定するか両方省略します。`--entry-side`は`income|expense`、`--sort-type`は`created_at_desc`だけを指定できます。日付は実在する`YYYY-MM-DD`で、開始日は終了日以前にします。
+
+出力はAPIの要素をそのまま含むJSON配列です。`--limit`は1〜100、`--offset`は0以上の整数です。両方を省略すると100件ずつ全ページを取得し、いずれかを指定するとそのページだけを取得します。ファイルへ保存する`export wallet-txns`は従来どおりです。
 
 ### 取引・証憑
 
@@ -160,7 +175,22 @@ dry-runの出力例（架空の値）:
 
 名前の解決にはdry-runでも読み取りAPIと認証が必要です。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
 
-これら2つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+#### 取引の支払行の作成（dry-run既定）
+
+```bash
+freee deals payments create 6 --company-id 1 --date 2026-01-15 \
+  --from-walletable-type bank_account --from-walletable-id 2 --amount 123
+```
+
+上のIDと金額は架空です。dry-runでも認証し、取引と口座を読み、送信予定の`payload`・口座名・`guards`の各判定をJSONで表示します。ガードが不成立でもdry-runはエラー終了しません。`private_account_item`では口座一覧を読まず、`--from-walletable-id`を勘定科目IDとして送ります。他の口座区分は`bank_account|credit_card|wallet`です。金額とIDは1以上の安全な整数、日付は実在する`YYYY-MM-DD`を指定します。
+
+実行には同じ引数に`--execute --expect-amount 123`を追加します。`--expect-amount`がないと認証前に停止します。確認金額と支払金額の不一致、取引の事業所の不一致、支払残額が0以下、支払金額と支払残額の不一致、口座の不存在では送信しません。一部支払は扱いません。支払行が作成された後の再実行は、支払残額が0になるため停止します。同時実行を排他する仕組みではありません。
+
+#### 取引・証憑・支払の監査ログ
+
+これら3つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+
+支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。既存の書き込みと同様、`mode`（`dry-run|execute`）、`status`（`planned|attempting|succeeded|failed`）、`payload_redacted`を記録します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
 
 ### 取引先
 

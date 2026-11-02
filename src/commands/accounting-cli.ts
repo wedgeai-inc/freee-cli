@@ -1,3 +1,5 @@
+import { runWalletTxnsList, validateWalletTxnsListOptions, type WalletTxnsListOptions } from "./wallet-txns/list.js";
+import type { ReadOnlyClient } from "../lib/clients/read-only-client.js";
 import { Command } from "commander";
 import { readFile } from "node:fs/promises";
 import type { PublicFreeeClient } from "../lib/clients/freee-public-client.js";
@@ -6,6 +8,8 @@ import { runAccountItemsList } from "./account-items/list.js";
 import { runTaxesList } from "./taxes/list.js";
 import { runDealsList } from "./deals/list.js";
 import { runDealsGet } from "./deals/get.js";
+import { runDealsPaymentsCreate } from "./deals/payments/create.js";
+import { appendAccountingAudit } from "../lib/audit/accounting-audit.js";
 import { runDealsCreate } from "./deals/create.js";
 import { runReceiptsGet } from "./receipts/get.js";
 import { runReceiptsUpload } from "./receipts/upload.js";
@@ -25,9 +29,29 @@ function expectedTotal(raw: string | undefined): number | undefined {
   if (!/^-?[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error("--expect-total must be a safe integer");
   return Number(raw);
 }
-export function registerAccountingCommands(program: Command, getClient: () => Promise<PublicFreeeClient>): void {
+function parseOffset(raw: string): number {
+  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error("--offset must be a non-negative safe integer");
+  return Number(raw);
+}
+export function registerAccountingCommands(program: Command, getClient: () => Promise<PublicFreeeClient>, getReadOnlyClient: () => Promise<ReadOnlyClient>): void {
   company(program.command("account-items").command("list")).action(async opts => output((await runAccountItemsList({ companyId: parseCompanyId(opts.companyId) }, { client: await getClient() })).items));
   company(program.command("taxes").command("list")).action(async opts => output((await runTaxesList({ companyId: parseCompanyId(opts.companyId) }, { client: await getClient() })).items));
+  company(program.command("wallet-txns").command("list"))
+    .option("--walletable-type <type>").option("--walletable-id <id>")
+    .option("--start-date <YYYY-MM-DD>").option("--end-date <YYYY-MM-DD>")
+    .option("--entry-side <side>").option("--sort-type <type>")
+    .option("--limit <n>").option("--offset <n>")
+    .action(async opts => {
+      const options: WalletTxnsListOptions = {
+        companyId: parseCompanyId(opts.companyId), walletableType: opts.walletableType,
+        walletableId: opts.walletableId === undefined ? undefined : parsePositiveIntegerOption(opts.walletableId, "--walletable-id"),
+        startDate: opts.startDate, endDate: opts.endDate, entrySide: opts.entrySide, sortType: opts.sortType,
+        limit: opts.limit === undefined ? undefined : parsePositiveIntegerOption(opts.limit, "--limit"),
+        offset: opts.offset === undefined ? undefined : parseOffset(opts.offset),
+      };
+      validateWalletTxnsListOptions(options);
+      output((await runWalletTxnsList(options, { client: await getReadOnlyClient() })).items);
+    });
   const deals = program.command("deals").description("deal operations (default: dry-run)");
   const receipts = program.command("receipts").description("receipt operations (default: dry-run)");
   company(deals.command("list")).option("--partner-id <id>").option("--type <type>").option("--start-issue-date <YYYY-MM-DD>").option("--end-issue-date <YYYY-MM-DD>").option("--status <status>")
@@ -39,6 +63,17 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
     .requiredOption("--partner-id <id>").requiredOption("--detail <detail>", "account_item_id=...,tax_code=...,amount=...,description=... (repeatable)", collect, [])
     .option("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--ref-number <text>").option("--expect-total <amount>").option("--allow-duplicate")
     .action(async opts => output(await runDealsCreate({ companyId: parseCompanyId(opts.companyId), type: opts.type, issueDate: opts.issueDate, dueDate: opts.dueDate, partnerId: parsePositiveIntegerOption(opts.partnerId, "--partner-id"), details: opts.detail, receiptIds: opts.receiptId.map((id: string) => parsePositiveIntegerOption(id, "--receipt-id")), refNumber: opts.refNumber, execute: Boolean(opts.execute), expectTotal: expectedTotal(opts.expectTotal), allowDuplicate: Boolean(opts.allowDuplicate), logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendDealAudit(opts.logDir, entry), now: () => new Date() })));
+  writeOptions(deals.command("payments").command("create <deal-id>"))
+    .requiredOption("--date <YYYY-MM-DD>").requiredOption("--from-walletable-type <type>")
+    .requiredOption("--from-walletable-id <id>").requiredOption("--amount <n>").option("--expect-amount <n>")
+    .action(async (dealId, opts) => output(await runDealsPaymentsCreate({
+      companyId: parseCompanyId(opts.companyId), dealId: parsePositiveIntegerOption(dealId, "deal-id"),
+      date: opts.date, fromWalletableType: opts.fromWalletableType,
+      fromWalletableId: parsePositiveIntegerOption(opts.fromWalletableId, "--from-walletable-id"),
+      amount: parsePositiveIntegerOption(opts.amount, "--amount"),
+      expectAmount: opts.expectAmount === undefined ? undefined : parsePositiveIntegerOption(opts.expectAmount, "--expect-amount"),
+      execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId,
+    }, { getClient, appendAudit: entry => appendAccountingAudit(opts.logDir, entry), now: () => new Date() })));
   writeOptions(receipts.command("upload")).requiredOption("--file <path>").requiredOption("--issue-date <YYYY-MM-DD>").option("--description <text>").option("--expect-sha256 <hash>")
     .action(async opts => output(await runReceiptsUpload({ companyId: parseCompanyId(opts.companyId), file: opts.file, issueDate: opts.issueDate, description: opts.description, execute: Boolean(opts.execute), expectSha256: opts.expectSha256, logDir: opts.logDir, taskId: opts.taskId }, { getClient, readFile, appendAudit: entry => appendReceiptAudit(opts.logDir, entry), now: () => new Date() })));
 }

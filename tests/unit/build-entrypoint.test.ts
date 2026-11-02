@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-const PUBLIC_ROOT_COMMANDS = ["auth", "expense", "invoices", "quotations", "companies", "partners", "export", "walletables", "account-items", "taxes", "deals", "receipts"];
+const PUBLIC_ROOT_COMMANDS = ["auth", "expense", "invoices", "quotations", "companies", "partners", "export", "wallet-txns", "walletables", "account-items", "taxes", "deals", "receipts"];
 const REMOVED_COMMANDS = ["review", "register-deal", "apply-pay"];
 
 function commandNames(help: string): string[] {
@@ -26,6 +26,8 @@ describe("build entrypoint", () => {
 
     expect(commandNames(run("--help")).sort()).toEqual([...PUBLIC_ROOT_COMMANDS].sort());
     expect(commandNames(run("expense", "--help"))).toEqual(["list"]);
+    expect(commandNames(run("wallet-txns", "--help"))).toEqual(["list"]);
+    expect(commandNames(run("deals", "payments", "--help"))).toEqual(["create"]);
     for (const name of REMOVED_COMMANDS) {
       expect(run("--help")).not.toMatch(new RegExp(`^  ${name}\\b`, "m"));
       expect(run("expense", "--help")).not.toMatch(new RegExp(`^  ${name}\\b`, "m"));
