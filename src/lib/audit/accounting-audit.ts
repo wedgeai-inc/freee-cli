@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { redact } from "./redactor.js";
 
 export interface AccountingAuditEntry {
-  timestamp: string; task_id: string; event: "deal_create" | "deal_payment_create" | "receipt_upload";
+  timestamp: string; task_id: string; event: "deal_create" | "deal_payment_create" | "receipt_upload" | "wallet_txn_reconcile";
   mode: "dry-run" | "execute"; status: "planned" | "attempting" | "succeeded" | "failed";
   company_id: number; payload_redacted: unknown; target_id?: number; created_id?: number;
   write_state?: "not_attempted" | "rejected" | "unknown" | "succeeded"; reason?: string;

@@ -67,6 +67,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `companies list` | 読み取り |
 | `walletables list` | 読み取り |
 | `wallet-txns list` | 読み取り（口座明細） |
+| `wallet-txns reconcile <wallet-txn-id>` | 書き込み（全額消込・dry-run既定） |
 | `partners search` / `get` | 読み取り |
 | `partners create` / `update` | 書き込み（dry-run 既定） |
 | `invoices list` / `get` / `templates` | 読み取り |
@@ -203,11 +204,45 @@ freee deals payments create 6 --company-id 1 --date 2026-01-15 \
 
 実行には同じ引数に`--execute --expect-amount 123`を追加します。`--expect-amount`がないと認証前に停止します。確認金額と支払金額の不一致、取引の事業所の不一致、支払残額が0以下、支払金額と支払残額の不一致、口座・勘定科目の不存在、日付ガードの不成立では送信しません。一部支払は扱いません。支払行が作成された後の再実行は、支払残額が0になるため停止します。同時実行を排他する仕組みではありません。
 
-#### 取引・証憑・支払の監査ログ
+#### 口座明細と既存取引の消込（dry-run既定）
 
-これら3つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+```bash
+freee wallet-txns reconcile 8 --company-id 1 --deal-id 6 --amount 123 \
+  --expect-date 2026-01-15 --log-dir ./audit-logs --task-id sample
+# 実行する場合は同じ引数に --execute --expect-amount 123 を追加
+```
+
+上のIDと金額は架空です。既定はdry-runで、明細と取引を読み取り、`payload`・`wallet_txn`・`deal`・`guards`をJSONで返します。`--execute`には`--expect-amount`が必須で、省略すると認証前に停止します。IDと金額は正の安全な整数、`--expect-date`は実在する`YYYY-MM-DD`で指定します。1明細↔1取引の全額消込だけに対応し、差額を自動吸収しません（`adjustment_deal`非対応）。本文は`{ company_id, deals: [{ deal_id, amount }] }`だけです。
+
+次のガードをすべて満たす場合だけPOSTします。欠落・null・型違いの判定対象値は不成立です。
+
+| ガード | 成立条件 |
+|---|---|
+| `expectedAmountMatches` | `--expect-amount`が未指定、または`--amount`と一致 |
+| `expectedDateMatches` | `--expect-date`が未指定、または明細日と一致 |
+| `walletTxnCompanyMatches` / `dealCompanyMatches` | 明細・取引それぞれの事業所IDが指定値と一致 |
+| `walletTxnUnreconciled` | 明細の`status=1`かつ`due_amount=amount`（`status=4`の一部消込済みは不可） |
+| `walletTxnAmountMatches` | 明細金額の絶対値が指定金額と一致 |
+| `dealHasOutstandingAmount` | 取引の残額が正の安全な整数 |
+| `dealAmountMatchesDue` | 取引の残額が指定金額と一致 |
+| `entrySideMatchesDealType` | 明細の入出金区分と取引の収支区分が`income`同士または`expense`同士 |
+| `dateNotBeforeIssueDate` | 明細日が有効で、取引の発生日以降（同日を含む） |
+| `dateNotFuture` | 明細日が有効で、Asia/Tokyoの今日以前（今日を含む） |
+| `dealStatusUnsettled` | 取引の`status=unsettled` |
+
+ガード不成立のdry-runもJSONを標準出力へ返し、終了コード1になります。全成立なら終了コード0です。明細の摘要（`description`）は出力しません。`deal.partner_id`がある場合は取引先APIから`partner_name`を取得し、取得失敗はエラーにします。取引先IDがなければ名前もnullです。execute成功時は`created: { wallet_txn_id, deal_ids }`を追加します。
+
+freee側で明細または取引が既に別の対象で消込・決済済みならHTTP 409です。消込後の再実行は明細・取引のstatusや残額が変わるためガードで止まります。同時実行を排他する仕組みではありません。応答の明細ID・取引ID一覧・`new_deal_id=null`を検証し、不正なら送信済みとして停止します。`new_deal_id`が非nullなら想定外の差額取引が作られた旨を表示し、再実行前の確認を要求します。実機での動作は未検証です。
+
+出典：[freee公式APIリファレンス](https://developer.freee.co.jp/docs/accounting/reference)、[公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/v2020_06_15/open-api-3/api-schema.json)（2026-11-02時点の抜粋に準拠）、[消込APIのお知らせ](https://developer.freee.co.jp/accounting/accounting-improvement/8614)。
+
+#### 取引・証憑・支払・消込の監査ログ
+
+これら4つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
 
 支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。既存の書き込みと同様、`mode`（`dry-run|execute`）、`status`（`planned|attempting|succeeded|failed`）、`payload_redacted`を記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
+
+消込のイベント名は`wallet_txn_reconcile`、ファイル名は`freee-wallet-txn-reconcile-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`payload_redacted`は送信本文の`company_id`と`deals`で、`created_id`は保存しません。dry-runは`planned`を1件記録します。executeのガード不成立は支払と同じく`failed / not_attempted / guard_failed:<ガード名,...>`を1件記録し、POSTしません。送信前に`attempting`を保存し、成功は`succeeded`、失敗は`failed`と`write_state`を保存します。HTTP 409は`rejected`、通信障害やサーバーエラーは`unknown`、成功応答の検証失敗（想定外の差額取引を含む）や送信後の監査失敗は`succeeded`です。送信結果を確認してから再実行してください。
 
 ### 取引先
 

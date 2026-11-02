@@ -1,3 +1,4 @@
+import { runWalletTxnsReconcile } from "./wallet-txns/reconcile.js";
 import { runWalletTxnsList, validateWalletTxnsListOptions, type WalletTxnsListOptions } from "./wallet-txns/list.js";
 import type { ReadOnlyClient } from "../lib/clients/read-only-client.js";
 import { Command } from "commander";
@@ -36,7 +37,8 @@ function parseOffset(raw: string): number {
 export function registerAccountingCommands(program: Command, getClient: () => Promise<PublicFreeeClient>, getReadOnlyClient: () => Promise<ReadOnlyClient>): void {
   company(program.command("account-items").command("list")).action(async opts => output((await runAccountItemsList({ companyId: parseCompanyId(opts.companyId) }, { client: await getClient() })).items));
   company(program.command("taxes").command("list")).action(async opts => output((await runTaxesList({ companyId: parseCompanyId(opts.companyId) }, { client: await getClient() })).items));
-  company(program.command("wallet-txns").command("list"))
+  const walletTxns = program.command("wallet-txns");
+  company(walletTxns.command("list"))
     .option("--walletable-type <type>").option("--walletable-id <id>")
     .option("--start-date <YYYY-MM-DD>").option("--end-date <YYYY-MM-DD>")
     .option("--entry-side <side>").option("--sort-type <type>")
@@ -51,6 +53,20 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
       };
       validateWalletTxnsListOptions(options);
       output((await runWalletTxnsList(options, { client: await getReadOnlyClient() })).items);
+    });
+  writeOptions(walletTxns.command("reconcile <wallet-txn-id>"))
+    .requiredOption("--deal-id <id>").requiredOption("--amount <n>")
+    .option("--expect-amount <n>").option("--expect-date <YYYY-MM-DD>")
+    .action(async (walletTxnId, opts) => {
+      const result = await runWalletTxnsReconcile({
+        walletTxnId: parsePositiveIntegerOption(walletTxnId, "wallet-txn-id"),
+        companyId: parseCompanyId(opts.companyId), dealId: parsePositiveIntegerOption(opts.dealId, "--deal-id"),
+        amount: parsePositiveIntegerOption(opts.amount, "--amount"),
+        expectAmount: opts.expectAmount === undefined ? undefined : parsePositiveIntegerOption(opts.expectAmount, "--expect-amount"),
+        expectDate: opts.expectDate, execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId,
+      }, { getClient, appendAudit: entry => appendAccountingAudit(opts.logDir, entry), now: () => new Date() });
+      output(result);
+      if (result.mode === "dry-run" && Object.values(result.guards).some(ok => !ok)) process.exitCode = 1;
     });
   const deals = program.command("deals").description("deal operations (default: dry-run)");
   const receipts = program.command("receipts").description("receipt operations (default: dry-run)");
