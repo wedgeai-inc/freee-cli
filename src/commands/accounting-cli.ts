@@ -72,7 +72,7 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
   const deals = program.command("deals").description("deal operations (default: dry-run)");
   const receipts = program.command("receipts").description("receipt operations (default: dry-run)");
   company(receipts.command("list")).requiredOption("--start-date <YYYY-MM-DD>").requiredOption("--end-date <YYYY-MM-DD>")
-    .option("--user-name <text>").option("--number <n>").option("--comment-type <type>").option("--comment-important")
+    .option("--user-name <text>").option("--number <n>").option("--comment-type <type>").option("--comment-important").option("--no-comment-important")
     .option("--category <category>").option("--limit <n>").option("--offset <n>")
     .action(async opts => {
       if (opts.offset !== undefined && !/^[0-9]+$/.test(opts.offset)) throw new Error("--offset must be a non-negative integer");
@@ -84,7 +84,7 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
         offset: opts.offset === undefined ? undefined : Number(opts.offset),
       };
       validateReceiptsListOptions(options);
-      output((await runReceiptsList(options, { client: await getClient() })).items);
+      output((await runReceiptsList(options, { client: await getReadOnlyClient() })).items);
     });
   company(deals.command("list")).option("--partner-id <id>").option("--type <type>").option("--start-issue-date <YYYY-MM-DD>").option("--end-issue-date <YYYY-MM-DD>").option("--status <status>")
     .action(async opts => output((await runDealsList({ companyId: parseCompanyId(opts.companyId), partnerId: opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id"), type: opts.type, startIssueDate: opts.startIssueDate, endIssueDate: opts.endIssueDate, status: opts.status }, { client: await getClient() })).items));

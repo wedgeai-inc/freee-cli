@@ -31,13 +31,38 @@ it("ページ指定なしでは全ページを連結し、検索条件を各ペ�
 it("CLIから全フィルターを指定してJSON配列を出力する", async () => {
   const fetchFn = vi.fn().mockResolvedValue(jsonRes({ receipts: [receipt] }));
   const getClient = vi.fn(async () => new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "dummy-token", fetchFn }));
+  const getReadOnlyClient = vi.fn(async () => clientWith(fetchFn));
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const program = new Command().exitOverride();
-  registerAccountingCommands(program, getClient, vi.fn());
+  registerAccountingCommands(program, getClient, getReadOnlyClient);
   await program.parseAsync(["receipts", "list", "--company-id", "1", "--start-date", base.startDate, "--end-date", base.endDate, "--user-name", "架空", "--number", "4", "--comment-type", "raised", "--comment-important", "--category", "ignored", "--limit", "1", "--offset", "2"], { from: "user" });
+  expect(getClient).not.toHaveBeenCalled();
+  expect(getReadOnlyClient).toHaveBeenCalledTimes(1);
   expect(JSON.parse(log.mock.calls[0]![0])).toEqual([receipt]);
   expect(Object.fromEntries(new URL(fetchFn.mock.calls[0]![0]).searchParams)).toEqual({ company_id: "1", start_date: base.startDate, end_date: base.endDate, user_name: "架空", number: "4", comment_type: "raised", comment_important: "true", category: "ignored", limit: "1", offset: "2" });
   expect(fetchFn).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { flags: [], expected: undefined },
+  { flags: ["--comment-important"], expected: true },
+  { flags: ["--no-comment-important"], expected: false },
+])("CLIのコメント重要度指定$flagsをGETクエリへ渡す", async ({ flags, expected }) => {
+  const fetchFn = vi.fn().mockResolvedValue(jsonRes({ receipts: [] }));
+  const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "dummy-token", fetchFn });
+  const get = vi.spyOn(client, "get");
+  const getClient = vi.fn(async () => client);
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+  const getReadOnlyClient = vi.fn(async () => client);
+  registerAccountingCommands(program, getClient, getReadOnlyClient);
+  await program.parseAsync(["receipts", "list", "--company-id", "1", "--start-date", base.startDate, "--end-date", base.endDate, ...flags], { from: "user" });
+  expect(getClient).not.toHaveBeenCalled();
+  expect(getReadOnlyClient).toHaveBeenCalledTimes(1);
+  expect(get).toHaveBeenCalledWith("/api/1/receipts", { query: expect.objectContaining({ comment_important: expected }) });
+  const query = new URL(fetchFn.mock.calls[0]![0]).searchParams;
+  if (expected === undefined) expect(query.has("comment_important")).toBe(false);
+  else expect(query.get("comment_important")).toBe(String(expected));
 });
 
 it("不正な日付はCLIの認証読み込みと直接呼び出しのGETより前に拒否する", async () => {

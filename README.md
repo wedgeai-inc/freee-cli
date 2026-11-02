@@ -148,7 +148,7 @@ freee receipts list --company-id 1 --start-date 2026-02-01 --end-date 2026-02-28
 
 `deals list`のフィルターは任意です。`--type`は`income|expense`、`--status`は`settled|unsettled`を指定します。一覧は全ページを取得します。
 
-`receipts list`はアップロード日を`--start-date`・`--end-date`で指定し、JSON配列を返します。任意のフィルターは`--user-name`（表示名またはメールアドレスの部分一致）・`--number`（正の整数）・`--comment-type`（`posted|raised|resolved`）・`--comment-important`・`--category`（`all|without_deal|with_expense_application_line|with_deal|ignored`）です。ページ指定がなければ100件ずつ全ページを取得し、`--limit`（1〜3000）または`--offset`（0以上）を指定すると1ページだけ取得します。`--offset`だけ指定した場合も100件を取得します。
+`receipts list`はアップロード日を`--start-date`・`--end-date`で指定し、JSON配列を返します。任意のフィルターは`--user-name`（表示名またはメールアドレスの部分一致）・`--number`（正の整数）・`--comment-type`（`posted|raised|resolved`）・`--comment-important` / `--no-comment-important`・`--category`（`all|without_deal|with_expense_application_line|with_deal|ignored`）です。コメント重要度は`--comment-important`で`true`、`--no-comment-important`で`false`を指定でき、両方を省略すると`comment_important`クエリを送信しません。ページ指定がなければ100件ずつ全ページを取得し、`--limit`（1〜3000）または`--offset`（0以上）を指定すると1ページだけ取得します。`--offset`だけ指定した場合も100件を取得します。
 
 一覧にはSHA-256などのファイル内容のハッシュに相当する項目がありません。重複確認にはメモ（`description`）・アップロード日時（`created_at`）・アップロードしたユーザーを使います。
 
