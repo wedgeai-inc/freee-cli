@@ -66,6 +66,8 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `auth login` | 1Password に token を保存する初回認可 |
 | `companies list` | 読み取り |
 | `walletables list` | 読み取り |
+| `wallet-txns list` | 読み取り（口座明細） |
+| `wallet-txns reconcile <wallet-txn-id>` | 書き込み（全額消込・dry-run既定） |
 | `partners search` / `get` | 読み取り |
 | `partners create` / `update` | 書き込み（dry-run 既定） |
 | `invoices list` / `get` / `templates` | 読み取り |
@@ -76,13 +78,14 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `deals list` / `get <id>` | 読み取り |
 | `receipts get <id>` | 読み取り |
 | `deals create` | 書き込み（dry-run既定） |
+| `deals payments create <deal-id>` | 書き込み（dry-run既定） |
 | `receipts upload` | 書き込み（dry-run既定） |
 | `expense list` | 読み取り |
 | `export receipts` / `journals` / `wallet-txns` / `expense-applications` | 読み取り（ローカルへ保存） |
 
 共通のオプション:
 
-- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get`と`account-items`・`taxes`・`deals`・`receipts`はJSON固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
+- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get`と`account-items`・`taxes`・`deals`・`receipts`・`wallet-txns`はJSON固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
 - `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）
 - `--task-id <id>`: audit log に記録する task ID
 - `--profile <name>`: 1Password 管理の OAuth で使う profile（`FREEE_OAUTH_PROFILE` でも指定可）
@@ -102,6 +105,29 @@ freee walletables list --company-id <company-id> --type bank_account
 
 - `--type` に `bank_account` / `credit_card` / `wallet` を指定すると口座の種類で絞り込む。省略すると全種類を返す。
 - 同期状況と最終同期日時を含める。残高は出さない。
+
+#### 口座明細の一覧
+
+```bash
+freee wallet-txns list --company-id 1
+freee wallet-txns list --company-id 1 --walletable-type bank_account --walletable-id 2 \
+  --start-date 2026-01-01 --end-date 2026-01-31 --entry-side income \
+  --sort-type created_at_desc --limit 100 --offset 0
+```
+
+上のIDは架空です。`--walletable-type`（`bank_account|credit_card|wallet`）と`--walletable-id`は両方指定するか両方省略します。`--entry-side`は`income|expense`、`--sort-type`は`created_at_desc`だけを指定できます。日付は実在する`YYYY-MM-DD`で、開始日は終了日以前にします。
+
+出力はAPIの要素をそのまま含むJSON配列です。`--limit`は1〜100、`--offset`は0以上の整数です。両方を省略すると100件ずつ全ページを取得し、いずれかを指定するとそのページだけを取得します。ファイルへ保存する`export wallet-txns`は従来どおりです。
+
+出力の`status`はAPIの数値をそのまま返します。
+
+| status | 意味 |
+| --- | --- |
+| 1 | 消込待ち |
+| 2 | 消込済み |
+| 3 | 無視 |
+| 4 | 消込中 |
+| 6 | 対象外 |
 
 ### 取引・証憑
 
@@ -161,7 +187,62 @@ dry-runの出力例（架空の値）:
 
 名前の解決と重複検知にはdry-runでも読み取りAPIと認証が必要です。dry-runでも全ページを照合し、`duplicateCheck`に重複の有無・一致した取引ID・実行時に阻止されるか（重複あり、かつ`--allow-duplicate`なし）を返します。重複があってもdry-runは例外にせず報告し、APIへの書き込みは行いません。`--expect-total`を指定すると、`checks.expectTotal`に期待値・明細合計・一致結果を返し、不一致でも報告のみです。確認オプション未指定なら`checks`は追加しません。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
 
-これら2つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+#### 取引の支払行の作成（dry-run既定）
+
+```bash
+freee deals payments create 6 --company-id 1 --date 2026-01-15 \
+  --from-walletable-type bank_account --from-walletable-id 2 --amount 123
+```
+
+上のIDと金額は架空です。dry-runでも認証し、取引と口座を読み、送信予定の`payload`・口座名の`names`・`guards`の各判定・取引情報の`deal`をJSONで表示します。dry-runはガードがすべて成立すれば終了コード0、不成立ならJSONを標準出力へ出した上で終了コード1になります。自動化する側は終了コード1のとき`guards`を確認してください。
+
+`deal`は送信前の`id`・`type`・`issue_date`・`amount`・`due_amount`・`partner_id`・`partner_name`を含み、executeでも返します。取引先IDがあるときは取引先取得APIから名前を取得し、取得に失敗すれば停止します。取引先IDがnullなら名前もnullです。
+
+`private_account_item`では`--from-walletable-id`を勘定科目IDとして、`GET /api/1/account_items?company_id=...`で実在確認します。存在しない場合は`walletableExists=false`です。他の口座区分は`bank_account|credit_card|wallet`で、従来どおり口座一覧の区分とIDの組を照合し、勘定科目一覧は取得しません。金額とIDは1以上の安全な整数、日付は実在する`YYYY-MM-DD`を指定します。
+
+支払日が取引の発生日より前なら`dateNotBeforeIssueDate=false`、Asia/Tokyoの今日より未来なら`dateNotFuture=false`になります。発生日と同日・今日の支払は許可します。取引の発生日が取得できない、または不正なら応答エラーで停止します。
+
+実行には同じ引数に`--execute --expect-amount 123`を追加します。`--expect-amount`がないと認証前に停止します。確認金額と支払金額の不一致、取引の事業所の不一致、支払残額が0以下、支払金額と支払残額の不一致、口座・勘定科目の不存在、日付ガードの不成立では送信しません。一部支払は扱いません。支払行が作成された後の再実行は、支払残額が0になるため停止します。同時実行を排他する仕組みではありません。
+
+#### 口座明細と既存取引の消込（dry-run既定）
+
+```bash
+freee wallet-txns reconcile 8 --company-id 1 --deal-id 6 --amount 123 \
+  --expect-date 2026-01-15 --log-dir ./audit-logs --task-id sample
+# 実行する場合は同じ引数に --execute --expect-amount 123 を追加
+```
+
+上のIDと金額は架空です。既定はdry-runで、明細と取引を読み取り、`payload`・`wallet_txn`・`deal`・`guards`をJSONで返します。`--execute`には`--expect-amount`が必須で、省略すると認証前に停止します。IDと金額は正の安全な整数、`--expect-date`は実在する`YYYY-MM-DD`で指定します。1明細↔1取引の全額消込だけに対応し、差額を自動吸収しません（`adjustment_deal`非対応）。本文は`{ company_id, deals: [{ deal_id, amount }] }`だけです。
+
+次のガードをすべて満たす場合だけPOSTします。欠落・null・型違いの判定対象値は不成立です。
+
+| ガード | 成立条件 |
+|---|---|
+| `expectedAmountMatches` | `--expect-amount`が未指定、または`--amount`と一致 |
+| `expectedDateMatches` | `--expect-date`が未指定、または明細日と一致 |
+| `walletTxnCompanyMatches` / `dealCompanyMatches` | 明細・取引それぞれの事業所IDが指定値と一致 |
+| `walletTxnUnreconciled` | 明細金額が正の安全な整数で、`status=1`かつ`due_amount=amount`（`status=4`の一部消込済みは不可） |
+| `walletTxnAmountMatches` | 明細金額が正の安全な整数で、指定金額と完全一致 |
+| `dealHasOutstandingAmount` | 取引の残額が正の安全な整数 |
+| `dealAmountMatchesDue` | 取引の残額が指定金額と一致 |
+| `entrySideMatchesDealType` | 明細の入出金区分と取引の収支区分が`income`同士または`expense`同士 |
+| `dateNotBeforeIssueDate` | 明細日が有効で、取引の発生日以降（同日を含む） |
+| `dateNotFuture` | 明細日が有効で、Asia/Tokyoの今日以前（今日を含む） |
+| `dealStatusUnsettled` | 取引の`status=unsettled` |
+
+ガード不成立のdry-runもJSONを標準出力へ返し、終了コード1になります。全成立なら終了コード0です。明細の摘要（`description`）は出力しません。`deal.partner_id`がある場合は取引先APIから`partner_name`を取得し、取得失敗はエラーにします。取引先IDがなければ名前もnullです。execute成功時は`created: { wallet_txn_id, deal_ids }`を追加します。
+
+freee側で明細または取引が既に別の対象で消込・決済済みならHTTP 409です。消込後の再実行は明細・取引のstatusや残額が変わるためガードで止まります。同時実行を排他する仕組みではありません。応答の明細ID・`deal_ids`が要求した取引IDだけの配列（長さ1）であること・`new_deal_id=null`を検証し、不正なら送信済みとして停止します。`new_deal_id`が非nullなら想定外の差額取引が作られた旨を表示し、再実行前の確認を要求します。実機での動作は未検証です。
+
+出典：[freee公式APIリファレンス](https://developer.freee.co.jp/docs/accounting/reference)、[公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/v2020_06_15/open-api-3/api-schema.json)（2026-11-02時点の抜粋に準拠）、[消込APIのお知らせ](https://developer.freee.co.jp/accounting/accounting-improvement/8614)。
+
+#### 取引・証憑・支払・消込の監査ログ
+
+これら4つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+
+支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。既存の書き込みと同様、`mode`（`dry-run|execute`）、`status`（`planned|attempting|succeeded|failed`）、`payload_redacted`を記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
+
+消込のイベント名は`wallet_txn_reconcile`、ファイル名は`freee-wallet-txn-reconcile-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`payload_redacted`は送信本文の`company_id`と`deals`で、`created_id`は保存しません。dry-runは`planned`を1件記録します。executeのガード不成立は支払と同じく`failed / not_attempted / guard_failed:<ガード名,...>`を1件記録し、POSTしません。送信前に`attempting`を保存し、成功は`succeeded`、失敗は`failed`と`write_state`を保存します。HTTP 409は`rejected`、通信障害やサーバーエラーは`unknown`、成功応答の検証失敗（想定外の差額取引を含む）や送信後の監査失敗は`succeeded`です。送信結果を確認してから再実行してください。
 
 ### 取引先
 

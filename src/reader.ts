@@ -20,3 +20,5 @@ export { runPartnersSearch } from "./commands/partners/search.js";
 export type { PartnersSearchOptions, PartnersSearchResult, PartnerSummary } from "./commands/partners/search.js";
 export type { InvoiceSummary } from "./types/invoice.js";
 export type { ExpenseApplicationSummary } from "./types/expense.js";
+export { runWalletTxnsList } from "./commands/wallet-txns/list.js";
+export type { WalletTxnsListOptions } from "./commands/wallet-txns/list.js";
