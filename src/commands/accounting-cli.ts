@@ -46,7 +46,7 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
         companyId: parseCompanyId(opts.companyId), walletableType: opts.walletableType,
         walletableId: opts.walletableId === undefined ? undefined : parsePositiveIntegerOption(opts.walletableId, "--walletable-id"),
         startDate: opts.startDate, endDate: opts.endDate, entrySide: opts.entrySide, sortType: opts.sortType,
-        limit: opts.limit === undefined ? undefined : parsePositiveIntegerOption(opts.limit, "--limit"),
+        limit: opts.limit === undefined ? undefined : /^[0-9]+$/.test(opts.limit) ? Number(opts.limit) : NaN,
         offset: opts.offset === undefined ? undefined : parseOffset(opts.offset),
       };
       validateWalletTxnsListOptions(options);
@@ -66,14 +66,18 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
   writeOptions(deals.command("payments").command("create <deal-id>"))
     .requiredOption("--date <YYYY-MM-DD>").requiredOption("--from-walletable-type <type>")
     .requiredOption("--from-walletable-id <id>").requiredOption("--amount <n>").option("--expect-amount <n>")
-    .action(async (dealId, opts) => output(await runDealsPaymentsCreate({
-      companyId: parseCompanyId(opts.companyId), dealId: parsePositiveIntegerOption(dealId, "deal-id"),
-      date: opts.date, fromWalletableType: opts.fromWalletableType,
-      fromWalletableId: parsePositiveIntegerOption(opts.fromWalletableId, "--from-walletable-id"),
-      amount: parsePositiveIntegerOption(opts.amount, "--amount"),
-      expectAmount: opts.expectAmount === undefined ? undefined : parsePositiveIntegerOption(opts.expectAmount, "--expect-amount"),
-      execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId,
-    }, { getClient, appendAudit: entry => appendAccountingAudit(opts.logDir, entry), now: () => new Date() })));
+    .action(async (dealId, opts) => {
+      const result = await runDealsPaymentsCreate({
+        companyId: parseCompanyId(opts.companyId), dealId: parsePositiveIntegerOption(dealId, "deal-id"),
+        date: opts.date, fromWalletableType: opts.fromWalletableType,
+        fromWalletableId: parsePositiveIntegerOption(opts.fromWalletableId, "--from-walletable-id"),
+        amount: parsePositiveIntegerOption(opts.amount, "--amount"),
+        expectAmount: opts.expectAmount === undefined ? undefined : parsePositiveIntegerOption(opts.expectAmount, "--expect-amount"),
+        execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId,
+      }, { getClient, appendAudit: entry => appendAccountingAudit(opts.logDir, entry), now: () => new Date() });
+      output(result);
+      if (result.mode === "dry-run" && Object.values(result.guards).some(ok => !ok)) process.exitCode = 1;
+    });
   writeOptions(receipts.command("upload")).requiredOption("--file <path>").requiredOption("--issue-date <YYYY-MM-DD>").option("--description <text>").option("--expect-sha256 <hash>")
     .action(async opts => output(await runReceiptsUpload({ companyId: parseCompanyId(opts.companyId), file: opts.file, issueDate: opts.issueDate, description: opts.description, execute: Boolean(opts.execute), expectSha256: opts.expectSha256, logDir: opts.logDir, taskId: opts.taskId }, { getClient, readFile, appendAudit: entry => appendReceiptAudit(opts.logDir, entry), now: () => new Date() })));
 }

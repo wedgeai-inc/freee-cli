@@ -17,7 +17,7 @@ export function validateWalletTxnsListOptions(opts: WalletTxnsListOptions): void
   if (opts.startDate && opts.endDate && opts.startDate > opts.endDate) throw new Error("start_date must not follow end_date");
   if (opts.entrySide !== undefined && !["income", "expense"].includes(opts.entrySide)) throw new Error("invalid entry_side");
   if (opts.sortType !== undefined && opts.sortType !== "created_at_desc") throw new Error("invalid sort_type");
-  if (opts.limit !== undefined && (!Number.isSafeInteger(opts.limit) || opts.limit < 1 || opts.limit > 100)) throw new Error("limit must be between 1 and 100");
+  if (opts.limit !== undefined && (!Number.isSafeInteger(opts.limit) || opts.limit < 1 || opts.limit > 100)) throw new Error("--limit must be an integer between 1 and 100");
   if (opts.offset !== undefined && (!Number.isSafeInteger(opts.offset) || opts.offset < 0)) throw new Error("offset must be a non-negative safe integer");
 }
 export async function runWalletTxnsList(opts: WalletTxnsListOptions, deps: AccountingReadDeps): Promise<{ items: AccountingRecord[] }> {

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { rmSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FreeeApiError } from "../../src/lib/clients/freee-public-client.js";
@@ -9,6 +9,14 @@ import { InvoiceUncancelAuditWriteError, InvoiceUncancelGuardError, InvoiceUncan
 import { QuotationUncancelAuditWriteError, QuotationUncancelGuardError, QuotationUncancelResponseParseError, QuotationUncancelUnverifiedError, runQuotationsUncancel } from "../../src/commands/quotations/uncancel.js";
 import { createProgram } from "../../src/cli.js";
 import { runInvoicesCancel } from "../../src/commands/invoices/cancel.js";
+
+const testDirs: string[] = [];
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  testDirs.push(dir);
+  return dir;
+}
+afterEach(() => { for (const dir of testDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 const now = () => new Date("2026-09-08T00:00:00Z");
 const invoice = { id: 7, company_id: 9, invoice_number: "INV-7", total_amount: 10, partner_id: 2, cancel_status: "canceled" };
@@ -142,7 +150,7 @@ for (const subject of subjects) describe(`${subject.name} uncancel`, () => {
   });
 
   it("writes an audit file and refuses bearer or email leakage", async () => {
-    const dir = mkdtempSync(join(tmpdir(), `${subject.name}-uncancel-`)); const entry = { timestamp: now().toISOString(), ...audit, status: "planned" as const, put_state: "not_attempted" as const };
+    const dir = makeTempDir(`${subject.name}-uncancel-`); const entry = { timestamp: now().toISOString(), ...audit, status: "planned" as const, put_state: "not_attempted" as const };
     await subject.append(dir, entry as never); const content = readFileSync(join(dir, `freee-${subject.name}-uncancel-2026-09-08.jsonl`), "utf8"); expect(JSON.parse(content)).toEqual(entry);
     await expect(subject.append(dir, { ...entry, task_id: "Bearer secret" } as never)).rejects.toThrow(/redact/);
   });
@@ -174,7 +182,7 @@ for (const subject of subjects) describe(`${subject.name} uncancel の応答解�
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ [subject.entity]: target })))
       .mockResolvedValueOnce(new Response(JSON.stringify({ [subject.entity]: { id: 7, cancel_status: "uncanceled" } })));
-    const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {}); const dir = mkdtempSync(join(tmpdir(), "uncancel-cli-execute-"));
+    const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {}); const dir = makeTempDir("uncancel-cli-execute-");
     const option = subject.entity === "invoice" ? "expect-invoice-number" : "expect-quotation-number";
     try { await createProgram().parseAsync([`${subject.entity}s`, "uncancel", "--company-id", "9", "--id", "7", "--execute", `--${option}`, number, "--log-dir", dir], { from: "user" }); }
     finally { log.mockRestore(); vi.unstubAllGlobals(); if (prior === undefined) delete process.env.FREEE_ACCESS_TOKEN; else process.env.FREEE_ACCESS_TOKEN = prior; }
@@ -201,7 +209,7 @@ describe("uncancel CLI", () => {
   it.each([["invoices", "invoice", "invoice_number", "INV-7", "expect-invoice-number"], ["quotations", "quotation", "quotation_number", "Q-7", "expect-quotation-number"]] as const)("%s は期待番号と GET の path / query を加工せずに渡す", async (plural, entity, number, expected, option) => {
     const spaced = ` ${expected} `;
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ [entity]: { ...(entity === "invoice" ? invoice : quotation), cancel_status: "canceled", [number]: spaced } })));
-    const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {}); const dir = mkdtempSync(join(tmpdir(), "uncancel-cli-forward-"));
+    const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {}); const dir = makeTempDir("uncancel-cli-forward-");
     try { await createProgram().parseAsync([plural, "uncancel", "--company-id", "9", "--id", "7", `--${option}`, spaced, "--log-dir", dir], { from: "user" }); }
     finally { log.mockRestore(); vi.unstubAllGlobals(); if (prior === undefined) delete process.env.FREEE_ACCESS_TOKEN; else process.env.FREEE_ACCESS_TOKEN = prior; }
     // 前後に空白を含む期待番号が trim されずに応答と一致する（trim されるとここで mismatch になる）
@@ -216,14 +224,14 @@ describe("uncancel CLI", () => {
     try { await expect(createProgram().parseAsync([plural, "uncancel", "--company-id", "bad", "--id", "7"], { from: "user" })).rejects.toThrow(/company-id/); }
     finally { if (previous === undefined) delete process.env.FREEE_ACCESS_TOKEN; else process.env.FREEE_ACCESS_TOKEN = previous; }
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ [entity]: { ...(entity === "invoice" ? invoice : quotation), cancel_status: "canceled", [number]: expected } })));
-    const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {}); const dir = mkdtempSync(join(tmpdir(), "uncancel-cli-"));
+    const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {}); const dir = makeTempDir("uncancel-cli-");
     try { await createProgram().parseAsync([plural, "uncancel", "--company-id", "9", "--id", "7", "--task-id", " exact-task ", "--log-dir", dir], { from: "user" }); }
     finally { log.mockRestore(); vi.unstubAllGlobals(); if (prior === undefined) delete process.env.FREEE_ACCESS_TOKEN; else process.env.FREEE_ACCESS_TOKEN = prior; }
     expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["GET"]); const content = readFileSync(join(dir, `freee-${entity}-uncancel-${new Date().toISOString().slice(0, 10)}.jsonl`), "utf8"); expect(JSON.parse(content).task_id).toBe(" exact-task ");
   });
   it.each([["invoices", "invoice", "invoice_number", "INV-7", "expect-invoice-number"], ["quotations", "quotation", "quotation_number", "Q-7", "expect-quotation-number"]] as const)("%s mismatch does not PUT", async (plural, entity, number, expected, option) => {
     const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "test"; const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ [entity]: { ...(entity === "invoice" ? invoice : quotation), [number]: expected } }))); vi.stubGlobal("fetch", fetchMock); const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    try { await expect(createProgram().parseAsync([plural, "uncancel", "--company-id", "9", "--id", "7", "--execute", `--${option}`, "wrong"], { from: "user" })).rejects.toThrow(/mismatch/); }
+    try { await expect(createProgram().parseAsync([plural, "uncancel", "--company-id", "9", "--id", "7", "--execute", `--${option}`, "wrong", "--log-dir", makeTempDir("uncancel-cli-mismatch-")], { from: "user" })).rejects.toThrow(/mismatch/); }
     finally { log.mockRestore(); vi.unstubAllGlobals(); if (prior === undefined) delete process.env.FREEE_ACCESS_TOKEN; else process.env.FREEE_ACCESS_TOKEN = prior; }
     expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["GET"]);
   });

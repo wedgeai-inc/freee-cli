@@ -118,6 +118,16 @@ freee wallet-txns list --company-id 1 --walletable-type bank_account --walletabl
 
 出力はAPIの要素をそのまま含むJSON配列です。`--limit`は1〜100、`--offset`は0以上の整数です。両方を省略すると100件ずつ全ページを取得し、いずれかを指定するとそのページだけを取得します。ファイルへ保存する`export wallet-txns`は従来どおりです。
 
+出力の`status`はAPIの数値をそのまま返します。
+
+| status | 意味 |
+| --- | --- |
+| 1 | 消込待ち |
+| 2 | 消込済み |
+| 3 | 無視 |
+| 4 | 消込中 |
+| 6 | 対象外 |
+
 ### 取引・証憑
 
 以下はすべて架空のID・名称・金額です。事業所・取引先・勘定科目・税区分は実行先の値に置き換えてください。
@@ -183,15 +193,21 @@ freee deals payments create 6 --company-id 1 --date 2026-01-15 \
   --from-walletable-type bank_account --from-walletable-id 2 --amount 123
 ```
 
-上のIDと金額は架空です。dry-runでも認証し、取引と口座を読み、送信予定の`payload`・口座名・`guards`の各判定をJSONで表示します。ガードが不成立でもdry-runはエラー終了しません。`private_account_item`では口座一覧を読まず、`--from-walletable-id`を勘定科目IDとして送ります。他の口座区分は`bank_account|credit_card|wallet`です。金額とIDは1以上の安全な整数、日付は実在する`YYYY-MM-DD`を指定します。
+上のIDと金額は架空です。dry-runでも認証し、取引と口座を読み、送信予定の`payload`・口座名の`names`・`guards`の各判定・取引情報の`deal`をJSONで表示します。dry-runはガードがすべて成立すれば終了コード0、不成立ならJSONを標準出力へ出した上で終了コード1になります。自動化する側は終了コード1のとき`guards`を確認してください。
 
-実行には同じ引数に`--execute --expect-amount 123`を追加します。`--expect-amount`がないと認証前に停止します。確認金額と支払金額の不一致、取引の事業所の不一致、支払残額が0以下、支払金額と支払残額の不一致、口座の不存在では送信しません。一部支払は扱いません。支払行が作成された後の再実行は、支払残額が0になるため停止します。同時実行を排他する仕組みではありません。
+`deal`は送信前の`id`・`type`・`issue_date`・`amount`・`due_amount`・`partner_id`・`partner_name`を含み、executeでも返します。取引先IDがあるときは取引先取得APIから名前を取得し、取得に失敗すれば停止します。取引先IDがnullなら名前もnullです。
+
+`private_account_item`では`--from-walletable-id`を勘定科目IDとして、`GET /api/1/account_items?company_id=...`で実在確認します。存在しない場合は`walletableExists=false`です。他の口座区分は`bank_account|credit_card|wallet`で、従来どおり口座一覧の区分とIDの組を照合し、勘定科目一覧は取得しません。金額とIDは1以上の安全な整数、日付は実在する`YYYY-MM-DD`を指定します。
+
+支払日が取引の発生日より前なら`dateNotBeforeIssueDate=false`、Asia/Tokyoの今日より未来なら`dateNotFuture=false`になります。発生日と同日・今日の支払は許可します。取引の発生日が取得できない、または不正なら応答エラーで停止します。
+
+実行には同じ引数に`--execute --expect-amount 123`を追加します。`--expect-amount`がないと認証前に停止します。確認金額と支払金額の不一致、取引の事業所の不一致、支払残額が0以下、支払金額と支払残額の不一致、口座・勘定科目の不存在、日付ガードの不成立では送信しません。一部支払は扱いません。支払行が作成された後の再実行は、支払残額が0になるため停止します。同時実行を排他する仕組みではありません。
 
 #### 取引・証憑・支払の監査ログ
 
 これら3つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
 
-支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。既存の書き込みと同様、`mode`（`dry-run|execute`）、`status`（`planned|attempting|succeeded|failed`）、`payload_redacted`を記録します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
+支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。既存の書き込みと同様、`mode`（`dry-run|execute`）、`status`（`planned|attempting|succeeded|failed`）、`payload_redacted`を記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
 
 ### 取引先
 

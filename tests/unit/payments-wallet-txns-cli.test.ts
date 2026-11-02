@@ -1,11 +1,25 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { mkdtemp, rm, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createProgram } from "../../src/cli.js";
 import { loadApiAuth } from "../../src/lib/token-config-loader.js";
 vi.mock("../../src/lib/token-config-loader.js", () => ({ loadApiAuth: vi.fn(async () => ({ accessToken: "dummy" })) }));
-afterEach(() => { vi.restoreAllMocks(); vi.mocked(loadApiAuth).mockClear(); });
+let logDir: string;
+let previousExitCode: typeof process.exitCode;
+beforeEach(async () => {
+  logDir = await mkdtemp(join(tmpdir(), "freee-payment-validation-cli-"));
+  previousExitCode = process.exitCode;
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-01-15T00:00:00Z"));
+});
+afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  vi.mocked(loadApiAuth).mockClear();
+  process.exitCode = previousExitCode;
+  await rm(logDir, { recursive: true });
+});
 
 it("wallet-txns listは全フィルターをクエリへ渡しJSON配列を表示する", async () => {
   const fetchFn = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ wallet_txns: [{ id: 9, balance: null }] })));
@@ -22,7 +36,7 @@ it("wallet-txns listは全フィルターをクエリへ渡しJSON配列を表�
 it("deals payments createをCLIから実行でき監査JSONLに取引IDを記録する", async () => {
   const dir = await mkdtemp(join(tmpdir(), "freee-payment-cli-"));
   try {
-    const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(new URL(String(url)).pathname.endsWith("walletables") ? { walletables: [{ id: 2, type: "wallet", name: "架空口座" }] } : { deal: { id: 6, company_id: 1, due_amount: 123 } })));
+    const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(new URL(String(url)).pathname.endsWith("walletables") ? { walletables: [{ id: 2, type: "wallet", name: "架空口座" }] } : { deal: { id: 6, company_id: 1, issue_date: "2026-01-15", type: "expense", amount: 123, partner_id: null, due_amount: 123 } })));
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await createProgram().parseAsync(["deals", "payments", "create", "6", "--company-id", "1", "--date", "2026-01-15", "--from-walletable-type", "wallet", "--from-walletable-id", "2", "--amount", "123", "--log-dir", dir, "--task-id", "sample"], { from: "user" });
     expect(JSON.parse(log.mock.calls[0]![0])).toMatchObject({ mode: "dry-run", guards: { amountMatchesDue: true } });
@@ -48,7 +62,7 @@ const invalidCliCases = [
 ];
 it.each(invalidCliCases.map(args => [args]))("不正なCLI入力%jを認証前に拒否する", async args => {
   const fetchFn = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected fetch"));
-  await expect(createProgram().exitOverride().parseAsync(args, { from: "user" })).rejects.toThrow();
+  await expect(createProgram().exitOverride().parseAsync(args[0] === "deals" ? [...args, "--log-dir", logDir] : args, { from: "user" })).rejects.toThrow();
   expect(loadApiAuth).not.toHaveBeenCalled();
   expect(fetchFn).not.toHaveBeenCalled();
 });
@@ -56,7 +70,7 @@ it.each(invalidCliCases.map(args => [args]))("不正なCLI入力%jを認証前�
 it("executeとexpect-amountをCLIから渡して1回だけ支払を送信する", async () => {
   const dir = await mkdtemp(join(tmpdir(), "freee-payment-execute-cli-"));
   try {
-    const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => new Response(JSON.stringify(new URL(String(url)).pathname.endsWith("walletables") ? { walletables: [{ id: 2, type: "bank_account", name: "架空口座" }] } : { deal: { id: 6, company_id: 1, due_amount: init?.method === "POST" ? 0 : 123 } })));
+    const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => new Response(JSON.stringify(new URL(String(url)).pathname.endsWith("walletables") ? { walletables: [{ id: 2, type: "bank_account", name: "架空口座" }] } : { deal: { id: 6, company_id: 1, issue_date: "2026-01-15", type: "expense", amount: 123, partner_id: null, due_amount: init?.method === "POST" ? 0 : 123 } })));
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await createProgram().parseAsync([...paymentArgs, "--execute", "--expect-amount", "123", "--log-dir", dir], { from: "user" });
     expect(fetchFn.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
@@ -65,4 +79,24 @@ it("executeとexpect-amountをCLIから渡して1回だけ支払を送信する"
     expect(entries.map(e => e.status)).toEqual(["attempting", "succeeded"]);
     expect(entries[1]).toMatchObject({ event: "deal_payment_create", target_id: 6, created_id: 6, write_state: "succeeded" });
   } finally { await rm(dir, { recursive: true }); }
+});
+
+it.each([true, false])("dry-runのガード成立%sに応じた終了コードとJSONをCLIで返す", async valid => {
+  const dir = await mkdtemp(join(tmpdir(), "freee-payment-exit-cli-"));
+  try {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-15T00:00:00Z"));
+    process.exitCode = 0;
+    const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async url => new Response(JSON.stringify(new URL(String(url)).pathname.endsWith("walletables") ? { walletables: [{ id: 2, type: "bank_account" }] } : { deal: { id: 6, company_id: 1, issue_date: "2026-01-15", type: "expense", amount: 123, due_amount: valid ? 123 : 0, partner_id: null } })));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await createProgram().parseAsync([...paymentArgs, "--log-dir", dir], { from: "user" });
+    expect(JSON.parse(log.mock.calls[0]![0])).toMatchObject({ mode: "dry-run", guards: { amountMatchesDue: valid }, deal: { id: 6, partner_id: null, partner_name: null } });
+    expect(process.exitCode).toBe(valid ? 0 : 1);
+    expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
+  } finally { await rm(dir, { recursive: true }); }
+});
+
+it.each(["0", "101", "1.5", "1e2"])("limit=%sを同じ範囲エラーで認証前に拒否する", async limit => {
+  await expect(createProgram().parseAsync([...walletArgs, "--limit", limit], { from: "user" })).rejects.toThrow("--limit must be an integer between 1 and 100");
+  expect(loadApiAuth).not.toHaveBeenCalled();
 });
