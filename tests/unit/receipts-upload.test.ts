@@ -14,6 +14,26 @@ function setup() {
   const appendAudit = vi.fn().mockResolvedValue(undefined);
   return { fetchFn, deps: { getClient, readFile, appendAudit, now: () => new Date("2026-01-15T00:00:00Z") } };
 }
+it("64MiBちょうどは許可し、1バイト超過はdry-runとexecuteとも認証・監査前に拒否する", async () => {
+  const limit = 64 * 1024 * 1024;
+  for (const execute of [false, true]) {
+    for (const size of [limit, limit + 1]) {
+      const { deps, fetchFn } = setup();
+      const content = new Uint8Array(size);
+      const upload = runReceiptsUpload({ ...options, execute, expectSha256: createHash("sha256").update(content).digest("hex") }, { ...deps, readFile: vi.fn(async () => content) });
+      if (size === limit) {
+        expect((await upload).file.size).toBe(limit);
+        expect(fetchFn).toHaveBeenCalledTimes(execute ? 1 : 0);
+        expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(execute ? ["attempting", "succeeded"] : ["planned"]);
+      } else {
+        await expect(upload).rejects.toThrow(`receipt upload: file size ${size} bytes exceeds limit ${limit} bytes`);
+        expect(deps.getClient).not.toHaveBeenCalled();
+        expect(deps.appendAudit).not.toHaveBeenCalled();
+        expect(fetchFn).not.toHaveBeenCalled();
+      }
+    }
+  }
+});
 it("dry-runはファイル名・サイズ・MIME・SHA-256・送信予定項目だけを返す", async () => {
   const { deps, fetchFn } = setup();
   const result = await runReceiptsUpload(options, deps);
@@ -71,4 +91,17 @@ it("receiptCreateParams.descriptionの255文字上限を送信前に検証する
   expect(deps.readFile).not.toHaveBeenCalled();
   expect(fetchFn).not.toHaveBeenCalled();
   expect((await runReceiptsUpload({ ...options, description: "a".repeat(255) }, deps)).fields.description).toHaveLength(255);
+});
+
+it("dry-runは指定されたハッシュの一致・不一致・形式不正を認証せず報告する", async () => {
+  for (const expected of [sha256, sha256.toUpperCase(), "b".repeat(64), "invalid", ""]) {
+    const { deps, fetchFn } = setup();
+    const result = await runReceiptsUpload({ ...options, expectSha256: expected }, deps);
+    const matches = expected.toLowerCase() === sha256;
+    expect(result).toMatchObject({ mode: "dry-run", checks: { expectSha256: { expected, actual: sha256, matches } } });
+    if (!matches) expect(result).toMatchObject({ checks: { expectSha256: { reason: expected.length === 64 ? "SHA-256 mismatch" : "expected SHA-256 must contain 64 hexadecimal characters" } } });
+    expect(deps.getClient).not.toHaveBeenCalled();
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["planned"]);
+  }
 });

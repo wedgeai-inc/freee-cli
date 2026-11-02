@@ -1,8 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { rmSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createProgram } from "../../src/cli.js";
+
+const testDirs: string[] = [];
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  testDirs.push(dir);
+  return dir;
+}
+afterEach(() => { for (const dir of testDirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 const plan = { quotation_date: "2026-09-08", partner_id: 1, partner_title: "御中", tax_entry_method: "out", tax_fraction: "omit", withholding_tax_entry_method: "out", lines: [{ description: "x", quantity: 1, unit_price: "100", tax_rate: 10 }] };
 const response = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
@@ -35,16 +43,16 @@ describe("quotations CLI entrypoints", () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ templates: [] })); await parse(["quotations", "templates", "--company-id", "1"], fetchMock); expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/quotations/templates?company_id=1");
   });
   it("create preserves task/log values and dry-run never POSTs", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "quotation-cli-")); const path = join(dir, "plan.json"); writeFileSync(path, JSON.stringify(plan)); const fetchMock = vi.fn();
+    const dir = makeTempDir("quotation-cli-"); const path = join(dir, "plan.json"); writeFileSync(path, JSON.stringify(plan)); const fetchMock = vi.fn();
     const logDir = `${dir}/ log `; await parse(["quotations", "create", "--company-id", "1", "--plan", path, "--task-id", " exact-task ", "--log-dir", logDir], fetchMock);
     expect(fetchMock).not.toHaveBeenCalled();
     const file = readdirSync(logDir).find((name) => name.startsWith("freee-quotation-create-")); expect(file).toBeDefined(); expect(JSON.parse(readFileSync(join(logDir, file!), "utf8")).task_id).toBe(" exact-task ");
   });
   it("cancel preserves task/log/expect values; dry-run and mismatch never PUT", async () => {
-    const get = response({ quotation: { id: 1, company_id: 1, quotation_number: " Q 1 ", total_amount: 1, partner_id: 2 } }); const dry = vi.fn().mockResolvedValue(get); const dir = mkdtempSync(join(tmpdir(), "quotation-cancel-cli-"));
+    const get = response({ quotation: { id: 1, company_id: 1, quotation_number: " Q 1 ", total_amount: 1, partner_id: 2 } }); const dry = vi.fn().mockResolvedValue(get); const dir = makeTempDir("quotation-cancel-cli-");
     const logDir = `${dir}/ log dir `; await parse(["quotations", "cancel", "--company-id", "1", "--id", "1", "--task-id", " exact-task ", "--log-dir", logDir], dry); expect(dry.mock.calls.map((call) => call[1]?.method)).toEqual(["GET"]); const file = readdirSync(logDir).find((name) => name.startsWith("freee-quotation-cancel-")); expect(file).toBeDefined(); expect(JSON.parse(readFileSync(join(logDir, file!), "utf8")).task_id).toBe(" exact-task ");
     const mismatch = vi.fn().mockResolvedValue(response({ quotation: { id: 1, company_id: 1, quotation_number: " Q 1 ", total_amount: 1, partner_id: 2 } }));
-    await expect(parse(["quotations", "cancel", "--company-id", "1", "--id", "1", "--execute", "--expect-quotation-number", "different value"], mismatch)).rejects.toThrow(/quotation_number/); expect(mismatch.mock.calls.map((call) => call[1]?.method)).toEqual(["GET"]);
+    await expect(parse(["quotations", "cancel", "--company-id", "1", "--id", "1", "--execute", "--expect-quotation-number", "different value", "--log-dir", logDir], mismatch)).rejects.toThrow(/quotation_number/); expect(mismatch.mock.calls.map((call) => call[1]?.method)).toEqual(["GET"]);
   });
   it.each(["1e2", " 100 ", "0x64", "0", "2147483648"])("get/cancel reject id %j before authentication", async (id) => {
     const prior = process.env.FREEE_ACCESS_TOKEN; process.env.FREEE_ACCESS_TOKEN = "";

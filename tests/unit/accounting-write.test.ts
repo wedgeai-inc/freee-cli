@@ -27,3 +27,13 @@ it("作成応答のID・事業所と更新対象IDを照合し、不正な応答
     expect(appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", write_state: "succeeded", reason: "invalid_response" }));
   }
 });
+it("任意の応答検証でフラットな消込結果を返しcreated_idを記録しない", async () => {
+  const appendAudit = vi.fn().mockResolvedValue(undefined);
+  const created = { wallet_txn_id: 8, deal_ids: [6] };
+  const validate = vi.fn(() => created);
+  const result = await auditedAccountingWrite(base, { now, appendAudit }, async () => new Response('{"wallet_txn_id":8}'), validate);
+  expect(result).toEqual(created);
+  expect(validate).toHaveBeenCalledExactlyOnceWith({ wallet_txn_id: 8 });
+  expect(appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "succeeded", write_state: "succeeded" }));
+  expect(appendAudit.mock.calls[1]![0]).not.toHaveProperty("created_id");
+});

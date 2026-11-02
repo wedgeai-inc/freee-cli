@@ -14,16 +14,16 @@ export async function runDealsCreate(opts: DealsCreateOptions, deps: DealsCreate
   const { payload, total } = buildDealPlan(opts);
   if (opts.execute && (opts.expectTotal === undefined || !Number.isSafeInteger(opts.expectTotal) || opts.expectTotal !== total)) throw new Error("--expect-total must match details total");
   const client = await deps.getClient();
-  if (opts.execute) {
-    const existing = await runDealsList({ companyId: opts.companyId, partnerId: opts.partnerId, startIssueDate: opts.issueDate, endIssueDate: opts.issueDate }, { client });
-    for (const deal of existing.items) {
-      assertId(deal.id as number, "response deal id"); assertId(deal.partner_id as number, "response partner_id");
-      assertAmount(deal.amount as number, "response amount");
-      if (typeof deal.issue_date !== "string") throw new Error("invalid response: deal issue_date");
-      assertDate(deal.issue_date, "response issue_date");
-    }
-    if (existing.items.some(d => d.partner_id === opts.partnerId && d.issue_date === opts.issueDate && d.amount === total) && !opts.allowDuplicate) throw new Error("duplicate deal found; use --allow-duplicate only after checking");
+  const existing = await runDealsList({ companyId: opts.companyId, partnerId: opts.partnerId, startIssueDate: opts.issueDate, endIssueDate: opts.issueDate }, { client });
+  for (const deal of existing.items) {
+    assertId(deal.id as number, "response deal id"); assertId(deal.partner_id as number, "response partner_id");
+    assertAmount(deal.amount as number, "response amount");
+    if (typeof deal.issue_date !== "string") throw new Error("invalid response: deal issue_date");
+    assertDate(deal.issue_date, "response issue_date");
   }
+  const dealIds = existing.items.filter(d => d.partner_id === opts.partnerId && d.issue_date === opts.issueDate && d.amount === total).map(d => d.id as number);
+  const duplicateCheck = { found: dealIds.length > 0, dealIds, blocked: dealIds.length > 0 && !opts.allowDuplicate };
+  if (opts.execute && duplicateCheck.blocked) throw new Error("duplicate deal found; use --allow-duplicate only after checking");
   const partner = await runPartnersGet({ companyId: opts.companyId, id: opts.partnerId }, { client });
   const accounts = await runAccountItemsList(opts, { client });
   const taxes = await runTaxesList(opts, { client });
@@ -33,7 +33,8 @@ export async function runDealsCreate(opts: DealsCreateOptions, deps: DealsCreate
   const base = { task_id: opts.taskId, event: "deal_create" as const, mode, company_id: opts.companyId, payload_redacted: redactAccountingPayload(payload) };
   if (!opts.execute) {
     await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), status: "planned" });
-    return { mode, payload, total, names };
+    return { mode, payload, total, names, duplicateCheck,
+      ...(opts.expectTotal === undefined ? {} : { checks: { expectTotal: { expected: opts.expectTotal, actual: total, matches: Number.isSafeInteger(opts.expectTotal) && opts.expectTotal === total } } }) };
   }
   const created = await auditedAccountingWrite(base, deps, () => client.post("/api/1/deals", { body: payload }), "deal");
   return { mode, payload, total, names, created };

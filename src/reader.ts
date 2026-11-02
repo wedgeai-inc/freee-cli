@@ -22,3 +22,5 @@ export type { InvoiceSummary } from "./types/invoice.js";
 export type { ExpenseApplicationSummary } from "./types/expense.js";
 export { runReceiptsList } from "./commands/receipts/list.js";
 export type { ReceiptsListOptions, ReceiptsListResult } from "./commands/receipts/list.js";
+export { runWalletTxnsList } from "./commands/wallet-txns/list.js";
+export type { WalletTxnsListOptions } from "./commands/wallet-txns/list.js";

@@ -33,7 +33,7 @@ it("CLIから全フィルターを指定してJSON配列を出力する", async 
   const getClient = vi.fn(async () => new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "dummy-token", fetchFn }));
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const program = new Command().exitOverride();
-  registerAccountingCommands(program, getClient);
+  registerAccountingCommands(program, getClient, vi.fn());
   await program.parseAsync(["receipts", "list", "--company-id", "1", "--start-date", base.startDate, "--end-date", base.endDate, "--user-name", "架空", "--number", "4", "--comment-type", "raised", "--comment-important", "--category", "ignored", "--limit", "1", "--offset", "2"], { from: "user" });
   expect(JSON.parse(log.mock.calls[0]![0])).toEqual([receipt]);
   expect(Object.fromEntries(new URL(fetchFn.mock.calls[0]![0]).searchParams)).toEqual({ company_id: "1", start_date: base.startDate, end_date: base.endDate, user_name: "架空", number: "4", comment_type: "raised", comment_important: "true", category: "ignored", limit: "1", offset: "2" });
@@ -46,7 +46,7 @@ it("不正な日付はCLIの認証読み込みと直接呼び出しのGETより�
   expect(fetchFn).not.toHaveBeenCalled();
   const getClient = vi.fn();
   const program = new Command().exitOverride();
-  registerAccountingCommands(program, getClient);
+  registerAccountingCommands(program, getClient, vi.fn());
   await expect(program.parseAsync(["receipts", "list", "--company-id", "1", "--start-date", "2026-02-30", "--end-date", base.endDate], { from: "user" })).rejects.toThrow(/start_date/);
   expect(getClient).not.toHaveBeenCalled();
 });
@@ -70,7 +70,7 @@ it.each(invalidOptions)("%s=%sをGET前に拒否する", async (key, value, labe
 it.each(["", " ", "0x10", "1e2", "+1", "1.0", "-1", "abc", "9007199254740992"])("不正なoffset=%jを認証前に拒否する", async value => {
   const getClient = vi.fn();
   const program = new Command().exitOverride();
-  registerAccountingCommands(program, getClient);
+  registerAccountingCommands(program, getClient, vi.fn());
   await expect(program.parseAsync(["receipts", "list", "--company-id", "1", "--start-date", base.startDate, "--end-date", base.endDate, "--offset", value], { from: "user" })).rejects.toThrow(/offset/);
   expect(getClient).not.toHaveBeenCalled();
 });
@@ -83,7 +83,7 @@ it.each([
 ])("%s=%sを認証前に拒否する", async (flag, value, label) => {
   const getClient = vi.fn();
   const program = new Command().exitOverride();
-  registerAccountingCommands(program, getClient);
+  registerAccountingCommands(program, getClient, vi.fn());
   await expect(program.parseAsync(["receipts", "list", "--company-id", "1", "--start-date", base.startDate, "--end-date", base.endDate, flag, value], { from: "user" })).rejects.toThrow(label);
   expect(getClient).not.toHaveBeenCalled();
 });
@@ -91,7 +91,7 @@ it.each([
 it.each(["--company-id", "--start-date", "--end-date"])("必須の%sがないと認証を読まない", async flag => {
   const getClient = vi.fn();
   const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
-  registerAccountingCommands(program, getClient);
+  registerAccountingCommands(program, getClient, vi.fn());
   const args = ["--company-id", "1", "--start-date", base.startDate, "--end-date", base.endDate];
   args.splice(args.indexOf(flag), 2);
   await expect(program.parseAsync(["receipts", "list", ...args], { from: "user" })).rejects.toThrow(flag);

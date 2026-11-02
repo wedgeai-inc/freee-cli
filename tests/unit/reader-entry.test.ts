@@ -7,7 +7,7 @@ interface Seen {
   headers: Record<string, string>;
 }
 
-function mock(body: unknown = { invoices: [], partners: [], expense_applications: [] }) {
+function mock(body: unknown = { invoices: [], partners: [], expense_applications: [], wallet_txns: [] }) {
   const seen: Seen[] = [];
   const fetchFn = (async (url: string, init?: RequestInit) => {
     seen.push({ url, method: init?.method ?? "GET", headers: (init?.headers ?? {}) as Record<string, string> });
@@ -31,6 +31,7 @@ describe("reader entry (read-only surface)", () => {
         "runInvoicesList",
         "runPartnersSearch",
         "runReceiptsList",
+        "runWalletTxnsList",
       ].sort(),
     );
     const exported = reader as Record<string, unknown>;
@@ -68,6 +69,7 @@ describe("reader entry (read-only surface)", () => {
     await reader.runInvoicesList({ companyId: 1 }, { client: inv });
     await reader.runExpenseList({ companyId: 1 }, { client: acc });
     await reader.runPartnersSearch({ companyId: 1, keyword: "a" }, { client: acc });
+    await reader.runWalletTxnsList({ companyId: 1 }, { client: acc });
     expect(seen.length).toBeGreaterThanOrEqual(6);
     expect(new Set(seen.map((s) => s.method))).toEqual(new Set(["GET"]));
     expect(seen.every((s) => s.headers["Authorization"] === "Bearer t")).toBe(true);

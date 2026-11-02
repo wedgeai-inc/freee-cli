@@ -11,12 +11,20 @@ export class AccountingWriteError extends Error {
     this.name = "AccountingWriteError";
   }
 }
+export function auditedAccountingWrite<E extends AccountingAuditEntry>(
+  base: Omit<E, "timestamp" | "status" | "write_state">, deps: AccountingWriteDeps<E>,
+  send: () => Promise<Response>, envelope: "deal" | "receipt",
+): Promise<{ id: number }>;
+export function auditedAccountingWrite<E extends AccountingAuditEntry, R>(
+  base: Omit<E, "timestamp" | "status" | "write_state">, deps: AccountingWriteDeps<E>,
+  send: () => Promise<Response>, validate: (payload: unknown) => R,
+): Promise<R>;
 export async function auditedAccountingWrite<E extends AccountingAuditEntry>(
   base: Omit<E, "timestamp" | "status" | "write_state">,
   deps: AccountingWriteDeps<E>,
   send: () => Promise<Response>,
-  envelope: "deal" | "receipt",
-): Promise<{ id: number }> {
+  envelope: "deal" | "receipt" | ((payload: unknown) => unknown),
+): Promise<unknown> {
   const now = stableClock(deps.now);
   const timestamp = now().toISOString();
   try {
@@ -30,14 +38,20 @@ export async function auditedAccountingWrite<E extends AccountingAuditEntry>(
     state = "succeeded";
     reason = "invalid_response";
     const payload = await response.json();
-    const item = isRecord(payload) ? payload[envelope] : undefined;
-    id = isRecord(item) && typeof item.id === "number" ? item.id : undefined;
-    assertId(id!, "response id");
-    if (isRecord(item) && item.company_id !== undefined && item.company_id !== base.company_id) throw new Error("invalid response company_id");
-    if (base.target_id !== undefined && id !== base.target_id) throw new Error("invalid response target id");
+    let result: unknown;
+    if (typeof envelope === "function") {
+      result = envelope(payload);
+    } else {
+      const item = isRecord(payload) ? payload[envelope] : undefined;
+      id = isRecord(item) && typeof item.id === "number" ? item.id : undefined;
+      assertId(id!, "response id");
+      if (isRecord(item) && item.company_id !== undefined && item.company_id !== base.company_id) throw new Error("invalid response company_id");
+      if (base.target_id !== undefined && id !== base.target_id) throw new Error("invalid response target id");
+      result = { id: id! };
+    }
     reason = "audit_write_failed";
-    await deps.appendAudit({ ...base, timestamp: now().toISOString(), status: "succeeded", write_state: state, created_id: id } as E);
-    return { id: id! };
+    await deps.appendAudit({ ...base, timestamp: now().toISOString(), status: "succeeded", write_state: state, ...(id === undefined ? {} : { created_id: id }) } as E);
+    return result;
   } catch (error) {
     if (error instanceof FreeeApiError) {
       state = error.status >= 400 && error.status < 500 ? "rejected" : "unknown";
