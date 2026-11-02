@@ -30,6 +30,7 @@ describe("reader entry (read-only surface)", () => {
         "runExpenseList",
         "runInvoicesList",
         "runPartnersSearch",
+        "runReceiptsList",
       ].sort(),
     );
     const exported = reader as Record<string, unknown>;

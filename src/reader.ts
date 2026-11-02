@@ -20,3 +20,5 @@ export { runPartnersSearch } from "./commands/partners/search.js";
 export type { PartnersSearchOptions, PartnersSearchResult, PartnerSummary } from "./commands/partners/search.js";
 export type { InvoiceSummary } from "./types/invoice.js";
 export type { ExpenseApplicationSummary } from "./types/expense.js";
+export { runReceiptsList } from "./commands/receipts/list.js";
+export type { ReceiptsListOptions, ReceiptsListResult } from "./commands/receipts/list.js";
