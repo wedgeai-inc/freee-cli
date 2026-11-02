@@ -7,7 +7,6 @@ import { runTaxesList } from "./taxes/list.js";
 import { runDealsList } from "./deals/list.js";
 import { runDealsGet } from "./deals/get.js";
 import { runDealsCreate } from "./deals/create.js";
-import { runDealsAttachReceipt } from "./deals/attach-receipt.js";
 import { runReceiptsGet } from "./receipts/get.js";
 import { runReceiptsUpload } from "./receipts/upload.js";
 import { appendDealAudit } from "../lib/audit/deal-audit.js";
@@ -40,8 +39,6 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
     .requiredOption("--partner-id <id>").requiredOption("--detail <detail>", "account_item_id=...,tax_code=...,amount=...,description=... (repeatable)", collect, [])
     .option("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--ref-number <text>").option("--expect-total <amount>").option("--allow-duplicate")
     .action(async opts => output(await runDealsCreate({ companyId: parseCompanyId(opts.companyId), type: opts.type, issueDate: opts.issueDate, dueDate: opts.dueDate, partnerId: parsePositiveIntegerOption(opts.partnerId, "--partner-id"), details: opts.detail, receiptIds: opts.receiptId.map((id: string) => parsePositiveIntegerOption(id, "--receipt-id")), refNumber: opts.refNumber, execute: Boolean(opts.execute), expectTotal: expectedTotal(opts.expectTotal), allowDuplicate: Boolean(opts.allowDuplicate), logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendDealAudit(opts.logDir, entry), now: () => new Date() })));
-  writeOptions(deals.command("attach-receipt <id>")).requiredOption("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--expect-total <amount>")
-    .action(async (id, opts) => output(await runDealsAttachReceipt({ companyId: parseCompanyId(opts.companyId), id: parsePositiveIntegerOption(id, "id"), receiptIds: opts.receiptId.map((value: string) => parsePositiveIntegerOption(value, "--receipt-id")), execute: Boolean(opts.execute), expectTotal: expectedTotal(opts.expectTotal), logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendDealAudit(opts.logDir, entry), now: () => new Date() })));
   writeOptions(receipts.command("upload")).requiredOption("--file <path>").requiredOption("--issue-date <YYYY-MM-DD>").option("--description <text>").option("--expect-sha256 <hash>")
     .action(async opts => output(await runReceiptsUpload({ companyId: parseCompanyId(opts.companyId), file: opts.file, issueDate: opts.issueDate, description: opts.description, execute: Boolean(opts.execute), expectSha256: opts.expectSha256, logDir: opts.logDir, taskId: opts.taskId }, { getClient, readFile, appendAudit: entry => appendReceiptAudit(opts.logDir, entry), now: () => new Date() })));
 }

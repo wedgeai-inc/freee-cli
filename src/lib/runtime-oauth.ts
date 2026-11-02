@@ -20,7 +20,6 @@ const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
   ["deals", "list"],
   ["deals", "get"],
   ["deals", "create"],
-  ["deals", "attach-receipt"],
   ["receipts", "get"],
   ["receipts", "upload"],
   ["partners", "search"],

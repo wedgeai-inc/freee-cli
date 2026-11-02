@@ -75,7 +75,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `account-items list` / `taxes list` | 読み取り（勘定科目・税区分） |
 | `deals list` / `get <id>` | 読み取り |
 | `receipts get <id>` | 読み取り |
-| `deals create` / `attach-receipt <id>` | 書き込み（dry-run既定） |
+| `deals create` | 書き込み（dry-run既定） |
 | `receipts upload` | 書き込み（dry-run既定） |
 | `expense list` | 読み取り |
 | `export receipts` / `journals` / `wallet-txns` / `expense-applications` | 読み取り（ローカルへ保存） |
@@ -160,15 +160,7 @@ dry-runの出力例（架空の値）:
 
 名前の解決にはdry-runでも読み取りAPIと認証が必要です。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
 
-#### 既存取引への証憑追加（dry-run既定）
-
-```bash
-freee deals attach-receipt 6 --company-id 1 --receipt-id 5
-```
-
-取得した既存明細の書き込み項目と証憑IDを保持し、証憑IDを重複なく追加します。`--receipt-id`は繰り返し指定できます。実行には`--execute --expect-total 1500`のように既存取引の税込合計の一致が必要です。取得から更新までに他の更新を行わないでください。
-
-これら3つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+これら2つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
 
 ### 取引先
 
