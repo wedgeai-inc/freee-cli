@@ -63,3 +63,69 @@ it("名前解決不能や重複照合に必要な応答項目がない場合は�
     expect(fetchFn.mock.calls.some(c => c[1]?.method === "POST")).toBe(false);
   }
 });
+
+it("dry-runは合計確認の一致・不一致を報告し、未指定ならchecksを追加しない", async () => {
+  for (const expected of [1500, 1499, NaN, Infinity, 1500.5, undefined]) {
+    const { deps, fetchFn } = setup();
+    const result = await runDealsCreate({ ...options, expectTotal: expected }, deps);
+    if (expected === undefined) expect(result).not.toHaveProperty("checks");
+    else expect(result).toMatchObject({ checks: { expectTotal: { expected, actual: 1500, matches: expected === 1500 } } });
+    expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
+    expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["planned"]);
+  }
+});
+
+it("dry-runは重複の有無とallowDuplicateによる実行阻止の有無をGETだけで報告する", async () => {
+  for (const duplicate of [false, true]) {
+    for (const allowDuplicate of [false, true]) {
+      const { deps, fetchFn } = setup(duplicate);
+      const result = await runDealsCreate({ ...options, allowDuplicate }, deps);
+      expect(result).toMatchObject({ duplicateCheck: { found: duplicate, dealIds: duplicate ? [7] : [], blocked: duplicate && !allowDuplicate } });
+      const listCall = fetchFn.mock.calls.find(c => new URL(c[0]).pathname === "/api/1/deals");
+      expect(listCall).toBeDefined();
+      const query = new URL(listCall![0]).searchParams;
+      expect(Object.fromEntries(query)).toMatchObject({ company_id: "1", partner_id: "2", start_issue_date: options.issueDate, end_issue_date: options.issueDate });
+      expect(query.has("type")).toBe(false);
+      expect(query.has("status")).toBe(false);
+      expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
+      expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["planned"]);
+    }
+  }
+});
+
+it("dry-runも重複照合の不正な応答を監査・書き込み前に拒否する", async () => {
+  const valid = { id: 7, partner_id: 2, issue_date: options.issueDate, amount: 1500 };
+  for (const deals of ["invalid", [null], [{}], ...[
+    { id: 0 }, { partner_id: 0 }, { amount: "1500" }, { amount: 1.5 },
+    { issue_date: 20260115 }, { issue_date: "2026-02-30" },
+  ].map(patch => [{ ...valid, ...patch }])]) {
+    const { client, deps, fetchFn } = setup();
+    const original = client.get.bind(client);
+    vi.spyOn(client, "get").mockImplementation(async (path, opts) => path === "/api/1/deals"
+      ? new Response(JSON.stringify({ deals })) : original(path, opts));
+    await expect(runDealsCreate(options, deps)).rejects.toThrow();
+    expect(deps.appendAudit).not.toHaveBeenCalled();
+    expect(fetchFn).not.toHaveBeenCalled();
+  }
+});
+
+it("dry-runは全ページを照合し、取引先・日付・合計がすべて一致するIDだけを報告する", async () => {
+  const { client, deps, fetchFn } = setup();
+  const valid = { id: 7, partner_id: 2, issue_date: options.issueDate, amount: 1500 };
+  const pages = [
+    Array.from({ length: 100 }, (_, i) => ({ ...valid, id: i + 10, amount: 1400 })),
+    [valid, { ...valid, id: 8 }, { ...valid, id: 9, partner_id: 3 }, { ...valid, id: 110, issue_date: "2026-01-16" }],
+  ];
+  const original = client.get.bind(client);
+  const offsets: unknown[] = [];
+  vi.spyOn(client, "get").mockImplementation(async (path, opts) => {
+    if (path !== "/api/1/deals") return original(path, opts);
+    offsets.push(opts?.query?.offset);
+    return new Response(JSON.stringify({ deals: pages[Number(opts?.query?.offset) / 100] }));
+  });
+  const result = await runDealsCreate(options, deps);
+  expect(result).toMatchObject({ duplicateCheck: { found: true, dealIds: [7, 8], blocked: true } });
+  expect(offsets).toEqual([0, 100]);
+  expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
+  expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["planned"]);
+});

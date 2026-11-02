@@ -140,7 +140,7 @@ freee receipts upload --company-id 1 --file ./sample.pdf \
   --issue-date 2026-01-15 --description '架空証憑'
 ```
 
-ファイル名・バイト数・拡張子から推定したMIME・SHA-256・送信予定項目をJSONで表示します。dry-runでは認証も送信も行いません。実行する場合は表示されたハッシュを確認して、同じ引数に`--execute --expect-sha256 <確認したSHA-256>`を追加します。一致したバイト列をメモリ上に保持してmultipartで送信し、結果の`created.id`に`receipt.id`を出力します。ファイルの内容は監査ログに保存しません。
+ファイル名・バイト数・拡張子から推定したMIME・SHA-256・送信予定項目をJSONで表示します。dry-runでは認証も送信も行いません。実行する場合は表示されたハッシュを確認して、同じ引数に`--execute --expect-sha256 <確認したSHA-256>`を追加します。一致したバイト列をメモリ上に保持してmultipartで送信し、結果の`created.id`に`receipt.id`を出力します。ファイルの内容は監査ログに保存しません。ファイルサイズは64MBまで（単位が未定義のため64×1024×1024バイトと解釈し、上限ちょうどは許可）で、超過時は認証・監査ログの記録前にエラーにします。dry-runで`--expect-sha256`を指定すると、`checks.expectSha256`に期待値・実際のハッシュ・一致結果を返し、形式不正や不一致の理由も表示します。不一致でも送信せず、監査ログは`planned`のままです。
 
 #### 未決済取引の作成（dry-run既定）
 
@@ -151,7 +151,7 @@ freee deals create --company-id 1 --type expense --issue-date 2026-01-15 \
   --receipt-id 5 --ref-number sample-001
 ```
 
-`--detail`と`--receipt-id`は繰り返し指定できます。明細はカンマ区切りの`key=value`形式で、摘要にカンマは使えません。`--due-date`・`--receipt-id`・`--ref-number`と明細の`description`は任意です。金額は税込の非負整数で、`payments`は送らず未決済で登録します。
+`--detail`と`--receipt-id`は繰り返し指定できます。明細はカンマ区切りの`key=value`形式で、摘要にカンマは使えません。`--due-date`・`--receipt-id`・`--ref-number`と明細の`description`は任意です。金額は税込の安全な整数で、明細・合計とも負の値を許します。`payments`は送らず未決済で登録します。
 
 dry-runの出力例（架空の値）:
 
@@ -169,11 +169,12 @@ dry-runの出力例（架空の値）:
     "ref_number": "sample-001"
   },
   "total": 1500,
-  "names": {"partner": "架空取引先", "accountItems": ["架空科目"], "taxes": ["架空税区分"]}
+  "names": {"partner": "架空取引先", "accountItems": ["架空科目"], "taxes": ["架空税区分"]},
+  "duplicateCheck": {"found": false, "dealIds": [], "blocked": false}
 }
 ```
 
-名前の解決にはdry-runでも読み取りAPIと認証が必要です。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
+名前の解決と重複検知にはdry-runでも読み取りAPIと認証が必要です。dry-runでも全ページを照合し、`duplicateCheck`に重複の有無・一致した取引ID・実行時に阻止されるか（重複あり、かつ`--allow-duplicate`なし）を返します。重複があってもdry-runは例外にせず報告し、APIへの書き込みは行いません。`--expect-total`を指定すると、`checks.expectTotal`に期待値・明細合計・一致結果を返し、不一致でも報告のみです。確認オプション未指定なら`checks`は追加しません。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
 
 #### 取引の支払行の作成（dry-run既定）
 
