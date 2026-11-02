@@ -105,11 +105,20 @@ it.each([
   const result = await runWalletTxnsReconcile(options, deps);
   expect(result.guards).toMatchObject({ dateNotBeforeIssueDate: before, dateNotFuture: future });
 });
-it.each(["income", "expense"])("%sの符号付き明細と取引先名を確認する", async type => {
-  const { deps } = setup({ amount: -123, due_amount: -123, entry_side: type }, { type, partner_id: 3 });
-  const result = await runWalletTxnsReconcile({ ...options, expectDate: "2026-01-15", expectAmount: 123, execute: true }, deps);
-  expect(Object.values(result.guards).every(Boolean)).toBe(true);
+it.each(["income", "expense"])("%sの負の明細金額はdry-runで不成立を表示しexecuteは監査1件で拒否する", async type => {
+  const wallet = { amount: -123, due_amount: -123, entry_side: type };
+  const deal = { type, partner_id: 3 };
+  const dry = setup(wallet, deal);
+  const result = await runWalletTxnsReconcile(options, dry.deps);
+  expect(result.guards).toMatchObject({ walletTxnUnreconciled: false, walletTxnAmountMatches: false });
   expect(result.deal.partner_name).toBe("架空取引先");
+  expect(dry.writes()).toHaveLength(0);
+  const live = setup(wallet, deal);
+  await expect(runWalletTxnsReconcile({ ...options, expectAmount: 123, execute: true }, live.deps)).rejects.toThrow("reconcile guard failed: walletTxnUnreconciled, walletTxnAmountMatches");
+  expect(live.writes()).toHaveLength(0);
+  expect(live.deps.appendAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    status: "failed", write_state: "not_attempted", reason: "guard_failed:walletTxnUnreconciled,walletTxnAmountMatches",
+  }));
 });
 it.each(["attempting", "guard"])("送信前監査失敗%sではPOSTしない", async failure => {
   const { deps, writes } = setup(failure === "guard" ? { status: 4 } : {});
@@ -184,4 +193,15 @@ it("executeのガード拒否は取引先の参照より先に監査し送信を
   expect(deps.appendAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ status: "failed", write_state: "not_attempted", reason: "guard_failed:dealCompanyMatches" }));
   expect(fetchFn.mock.calls.some(c => new URL(c[0]).pathname.includes("/partners/"))).toBe(false);
   expect(writes()).toHaveLength(0);
+});
+
+it.each([[6, 7], [6, 6], [], [7], [7, 6]].map(dealIds => ({ dealIds })))("要求した取引IDだけでない応答$dealIdsは送信済みの応答検証失敗として停止する", async ({ dealIds }) => {
+  const { deps, fetchFn, writes } = setup();
+  const original = fetchFn.getMockImplementation()!;
+  fetchFn.mockImplementation(async (url, init) => init?.method === "POST"
+    ? new Response(JSON.stringify({ wallet_txn_id: 8, deal_ids: dealIds, new_deal_id: null })) : original(url, init));
+  await expect(runWalletTxnsReconcile({ ...options, execute: true, expectAmount: 123 }, deps)).rejects.toThrow("accounting write: 作成・更新済み");
+  expect(writes()).toHaveLength(1);
+  expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["attempting", "failed"]);
+  expect(deps.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", write_state: "succeeded", reason: "invalid_response" }));
 });

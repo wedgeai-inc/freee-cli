@@ -211,3 +211,22 @@ it.each([null, {}, [null]])("private_account_itemの不正な勘定科目一覧%
   await expect(runDealsPaymentsCreate({ ...options, fromWalletableType: "private_account_item" }, deps)).rejects.toThrow("invalid response: /api/1/account_items");
   expect(writes()).toHaveLength(0);
 });
+
+it.each(["http", "network", "invalid"])("取引先取得が失敗する%sでも未来日のガード拒否を先に監査する", async failure => {
+  const { deps, fetchFn, writes } = setup({ partner_id: 3 });
+  const original = fetchFn.getMockImplementation()!;
+  fetchFn.mockImplementation(async (url, init) => {
+    if (new URL(url).pathname !== "/api/1/partners/3") return original(url, init);
+    if (failure === "network") throw new Error("fictional partner disconnect");
+    if (failure === "http") return new Response("{}", { status: 403 });
+    return new Response("{}");
+  });
+  const error = await runDealsPaymentsCreate({ ...options, date: "2026-01-16", execute: true, expectAmount: 123 }, deps).catch(e => e);
+  expect(error).toBeInstanceOf(Error);
+  expect(error.message).toBe("payment guard failed: dateNotFuture");
+  expect(deps.appendAudit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    status: "failed", mode: "execute", write_state: "not_attempted", reason: "guard_failed:dateNotFuture",
+  }));
+  expect(fetchFn.mock.calls.some(c => new URL(c[0]).pathname === "/api/1/partners/3")).toBe(false);
+  expect(writes()).toHaveLength(0);
+});

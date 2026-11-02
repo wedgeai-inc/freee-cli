@@ -43,15 +43,6 @@ export async function runDealsPaymentsCreate(opts: DealsPaymentsCreateOptions, d
     const wallets = responseArray(await (await client.get("/api/1/walletables", { query: { company_id: opts.companyId } })).json(), "walletables", "/api/1/walletables");
     walletable = wallets.find(w => w.id === opts.fromWalletableId && w.type === opts.fromWalletableType);
   }
-  const partnerId = deal.partner_id ?? null;
-  let partnerName: unknown = null;
-  if (partnerId !== null) {
-    if (typeof partnerId !== "number") throw new Error("invalid response: deal partner_id");
-    assertId(partnerId, "invalid response: deal partner_id");
-    const partner = await runPartnersGet({ companyId: opts.companyId, id: partnerId }, { client });
-    partnerName = partner.name;
-  }
-  const dealSummary = { id: deal.id, type: deal.type, issue_date: deal.issue_date, amount: deal.amount, due_amount: deal.due_amount, partner_id: partnerId, partner_name: partnerName };
   const names = { walletable: walletable?.name };
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(deps.now());
   const guards = {
@@ -75,6 +66,15 @@ export async function runDealsPaymentsCreate(opts: DealsPaymentsCreateOptions, d
     }
     throw new Error(message);
   }
+  const partnerId = deal.partner_id ?? null;
+  let partnerName: unknown = null;
+  if (partnerId !== null) {
+    if (typeof partnerId !== "number") throw new Error("invalid response: deal partner_id");
+    assertId(partnerId, "invalid response: deal partner_id");
+    const partner = await runPartnersGet({ companyId: opts.companyId, id: partnerId }, { client });
+    partnerName = partner.name;
+  }
+  const dealSummary = { id: deal.id, type: deal.type, issue_date: deal.issue_date, amount: deal.amount, due_amount: deal.due_amount, partner_id: partnerId, partner_name: partnerName };
   if (!opts.execute) {
     await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), status: "planned" });
     return { mode, payload, names, guards, deal: dealSummary };

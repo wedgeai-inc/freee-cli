@@ -39,8 +39,8 @@ export async function runWalletTxnsReconcile(opts: WalletTxnsReconcileOptions, d
     expectedDateMatches: opts.expectDate === undefined || opts.expectDate === wallet.date,
     walletTxnCompanyMatches: wallet.company_id === opts.companyId,
     dealCompanyMatches: deal.company_id === opts.companyId,
-    walletTxnUnreconciled: wallet.status === 1 && typeof wallet.amount === "number" && Number.isSafeInteger(wallet.amount) && wallet.due_amount === wallet.amount,
-    walletTxnAmountMatches: typeof wallet.amount === "number" && Number.isSafeInteger(wallet.amount) && Math.abs(wallet.amount) === opts.amount,
+    walletTxnUnreconciled: wallet.status === 1 && typeof wallet.amount === "number" && Number.isSafeInteger(wallet.amount) && wallet.amount > 0 && wallet.due_amount === wallet.amount,
+    walletTxnAmountMatches: typeof wallet.amount === "number" && Number.isSafeInteger(wallet.amount) && wallet.amount > 0 && wallet.amount === opts.amount,
     dealHasOutstandingAmount: typeof deal.due_amount === "number" && Number.isSafeInteger(deal.due_amount) && deal.due_amount > 0,
     dealAmountMatchesDue: deal.due_amount === opts.amount,
     entrySideMatchesDealType: (wallet.entry_side === "income" || wallet.entry_side === "expense") && wallet.entry_side === deal.type,
@@ -73,7 +73,7 @@ export async function runWalletTxnsReconcile(opts: WalletTxnsReconcileOptions, d
     try {
       created = await auditedAccountingWrite(base, deps, () => client.post(`/api/1/wallet_txns/${opts.walletTxnId}/reconcile`, { body: payload }), response => {
         unexpectedAdjustment = isRecord(response) && response.new_deal_id !== undefined && response.new_deal_id !== null;
-        if (!isRecord(response) || response.wallet_txn_id !== opts.walletTxnId || !Array.isArray(response.deal_ids) || !response.deal_ids.every(id => typeof id === "number" && Number.isSafeInteger(id) && id > 0) || !response.deal_ids.includes(opts.dealId) || response.new_deal_id !== null) throw new Error("invalid reconcile response");
+        if (!isRecord(response) || response.wallet_txn_id !== opts.walletTxnId || !Array.isArray(response.deal_ids) || !response.deal_ids.every(id => typeof id === "number" && Number.isSafeInteger(id) && id > 0) || (response.deal_ids.length !== 1 || response.deal_ids[0] !== opts.dealId) || response.new_deal_id !== null) throw new Error("invalid reconcile response");
         return { wallet_txn_id: opts.walletTxnId, deal_ids: response.deal_ids as number[] };
       });
     } catch (error) {

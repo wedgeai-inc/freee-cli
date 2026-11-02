@@ -221,8 +221,8 @@ freee wallet-txns reconcile 8 --company-id 1 --deal-id 6 --amount 123 \
 | `expectedAmountMatches` | `--expect-amount`が未指定、または`--amount`と一致 |
 | `expectedDateMatches` | `--expect-date`が未指定、または明細日と一致 |
 | `walletTxnCompanyMatches` / `dealCompanyMatches` | 明細・取引それぞれの事業所IDが指定値と一致 |
-| `walletTxnUnreconciled` | 明細の`status=1`かつ`due_amount=amount`（`status=4`の一部消込済みは不可） |
-| `walletTxnAmountMatches` | 明細金額の絶対値が指定金額と一致 |
+| `walletTxnUnreconciled` | 明細金額が正の安全な整数で、`status=1`かつ`due_amount=amount`（`status=4`の一部消込済みは不可） |
+| `walletTxnAmountMatches` | 明細金額が正の安全な整数で、指定金額と完全一致 |
 | `dealHasOutstandingAmount` | 取引の残額が正の安全な整数 |
 | `dealAmountMatchesDue` | 取引の残額が指定金額と一致 |
 | `entrySideMatchesDealType` | 明細の入出金区分と取引の収支区分が`income`同士または`expense`同士 |
@@ -232,7 +232,7 @@ freee wallet-txns reconcile 8 --company-id 1 --deal-id 6 --amount 123 \
 
 ガード不成立のdry-runもJSONを標準出力へ返し、終了コード1になります。全成立なら終了コード0です。明細の摘要（`description`）は出力しません。`deal.partner_id`がある場合は取引先APIから`partner_name`を取得し、取得失敗はエラーにします。取引先IDがなければ名前もnullです。execute成功時は`created: { wallet_txn_id, deal_ids }`を追加します。
 
-freee側で明細または取引が既に別の対象で消込・決済済みならHTTP 409です。消込後の再実行は明細・取引のstatusや残額が変わるためガードで止まります。同時実行を排他する仕組みではありません。応答の明細ID・取引ID一覧・`new_deal_id=null`を検証し、不正なら送信済みとして停止します。`new_deal_id`が非nullなら想定外の差額取引が作られた旨を表示し、再実行前の確認を要求します。実機での動作は未検証です。
+freee側で明細または取引が既に別の対象で消込・決済済みならHTTP 409です。消込後の再実行は明細・取引のstatusや残額が変わるためガードで止まります。同時実行を排他する仕組みではありません。応答の明細ID・`deal_ids`が要求した取引IDだけの配列（長さ1）であること・`new_deal_id=null`を検証し、不正なら送信済みとして停止します。`new_deal_id`が非nullなら想定外の差額取引が作られた旨を表示し、再実行前の確認を要求します。実機での動作は未検証です。
 
 出典：[freee公式APIリファレンス](https://developer.freee.co.jp/docs/accounting/reference)、[公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/v2020_06_15/open-api-3/api-schema.json)（2026-11-02時点の抜粋に準拠）、[消込APIのお知らせ](https://developer.freee.co.jp/accounting/accounting-improvement/8614)。
 
