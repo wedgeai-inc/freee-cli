@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerAccountingCommands } from "./commands/accounting-cli.js";
 import { Command } from "commander";
 import { runInvoicesNextNumber } from "./commands/invoices/next-number.js";
 import { runQuotationsNextNumber } from "./commands/quotations/next-number.js";
@@ -59,6 +60,8 @@ export function createProgram(): Command {
   const program = new Command();
   program.name("freee").description("Unofficial CLI for the freee public API").option("--profile <name>", "OAuth profile");
   const loadPublicApiAuth = () => loadApiAuth({ profile: program.opts<{ profile?: string }>().profile });
+
+  registerAccountingCommands(program, async () => new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: (await loadPublicApiAuth()).accessToken }));
 
   const auth = program.command("auth").description("OAuth authentication");
   auth

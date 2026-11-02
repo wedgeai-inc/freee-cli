@@ -15,6 +15,14 @@ const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
   ["export", "wallet-txns"],
   ["export", "expense-applications"],
   ["companies", "list"],
+  ["account-items", "list"],
+  ["taxes", "list"],
+  ["deals", "list"],
+  ["deals", "get"],
+  ["deals", "create"],
+  ["deals", "attach-receipt"],
+  ["receipts", "get"],
+  ["receipts", "upload"],
   ["partners", "search"],
   ["partners", "create"],
   ["partners", "get"],
@@ -169,7 +177,8 @@ export function parseRuntimePlan(text: string): RuntimePlan {
  * parseRuntimePlan と runExportPlan（旧 API 互換）の双方で使う。
  */
 export function normalizeLegacyExportCommand(command: string[]): string[] {
-  return LEGACY_EXPORT_SUBCOMMANDS.has(command[0] as string) ? ["export", ...command] : [...command];
+  const receiptCommand = command[0] === "receipts" && ["get", "upload"].includes(command[1] ?? "");
+  return !receiptCommand && LEGACY_EXPORT_SUBCOMMANDS.has(command[0] as string) ? ["export", ...command] : [...command];
 }
 
 function isAllowlistedRuntimeCommand(command: readonly string[]): boolean {
