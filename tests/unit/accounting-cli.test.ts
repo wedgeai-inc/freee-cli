@@ -48,5 +48,7 @@ it("負の取引合計もexpect-totalで完全一致を確認して証憑を追�
     vi.spyOn(console, "log").mockImplementation(() => {});
     await program.parseAsync(["deals", "attach-receipt", "6", "--company-id", "1", "--receipt-id", "5", "--expect-total", "-300", "--execute", "--log-dir", dir], { from: "user" });
     expect(fetchFn.mock.calls.filter(c => c[1]?.method === "PUT")).toHaveLength(1);
+    const payload = JSON.parse(fetchFn.mock.calls[1]![1]!.body as string);
+    expect(payload.details).toEqual([{ id: 9, account_item_id: 3, tax_code: 0, amount: -300 }]);
   } finally { await rm(dir, { recursive: true }); }
 });

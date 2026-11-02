@@ -71,5 +71,20 @@ it("PUTの税コード上限と100明細の制限を守り、負の明細・合�
     expect(fetchFn.mock.calls.some(c => c[1]?.method === "PUT")).toBe(false);
   }
   fetchFn.mockImplementation(async (_url, init) => new Response(JSON.stringify({ deal: init?.method === "PUT" ? { id: 6 } : { ...deal, amount: -300, details } })));
-  expect((await runDealsAttachReceipt({ ...options, execute: true, expectTotal: -300 }, deps)).payload.details).toEqual(details);
+  const result = await runDealsAttachReceipt({ ...options, execute: true, expectTotal: -300 }, deps);
+  expect(result.payload.details).toEqual([{ id: 9, account_item_id: 3, tax_code: 0, amount: -300, partner_id: 0 }]);
+  expect(JSON.parse(fetchFn.mock.calls.at(-1)![1]!.body as string)).toEqual(result.payload);
+});
+
+it.each([false, true])("vatは非0の整数だけを保持する（execute=%s）", async execute => {
+  for (const vat of [136, -27, 0, null, undefined, 1.5, "136", false]) {
+    const { deps, fetchFn } = setup();
+    const existing = { ...deal, details: [{ ...deal.details[0], vat }] };
+    fetchFn.mockImplementation(async (_url, init) => new Response(JSON.stringify({ deal: init?.method === "PUT" ? { id: 6 } : existing })));
+    const result = await runDealsAttachReceipt({ ...options, execute, expectTotal: 1500 }, deps);
+    if (vat === 136 || vat === -27) expect(result.payload.details[0]).toHaveProperty("vat", vat);
+    else expect(result.payload.details[0]).not.toHaveProperty("vat");
+    expect(fetchFn).toHaveBeenCalledTimes(execute ? 2 : 1);
+    if (execute) expect(JSON.parse(fetchFn.mock.calls[1]![1]!.body as string)).toEqual(result.payload);
+  }
 });

@@ -24,7 +24,8 @@ export async function runDealsAttachReceipt(opts: DealsAttachReceiptOptions, dep
     assertId(detail.id as number, "response detail id"); assertId(detail.account_item_id as number, "response account_item_id");
     assertTaxCode(detail.tax_code as number, "response tax_code"); assertAmount(detail.amount as number, "response detail amount");
   }
-  const details = (deal.details as Record<string, unknown>[]).map(d => Object.fromEntries(Object.entries(d).filter(([key, value]) => DETAIL_FIELDS.includes(key) && value !== undefined && (value !== null || key === "partner_id"))));
+  // Omit zero VAT so tax categories that forbid an explicit VAT use automatic calculation.
+  const details = (deal.details as Record<string, unknown>[]).map(d => Object.fromEntries(Object.entries(d).filter(([key, value]) => DETAIL_FIELDS.includes(key) && value !== undefined && (value !== null || key === "partner_id") && (key !== "vat" || (typeof value === "number" && Number.isInteger(value) && value !== 0)))));
   const receiptIds: number[] = [];
   if (deal.receipts !== undefined) {
     if (!Array.isArray(deal.receipts) || !deal.receipts.every(isRecord)) throw new Error("invalid response: receipts");
