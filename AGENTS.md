@@ -27,4 +27,6 @@ AI コーディングエージェント向けの作業規約です。CC は `CLA
 - `invoices create|update|cancel|uncancel --execute`
 - `quotations create|cancel|uncancel --execute`
 - `partners create|update --execute`
+- `deals create --execute`
+- `receipts upload --execute`
 - `freee auth login`（ブラウザでの認可）

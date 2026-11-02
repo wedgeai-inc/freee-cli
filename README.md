@@ -11,7 +11,7 @@
 - **書き込みの記録を残します。** 実行結果を `./audit-logs/` に JSONL で保存します。メールアドレス・氏名・Authorization ヘッダーなど既知の項目名の値に加え、自由記述の中でもメールアドレスの形に一致する部分はマスクします。ただし個人情報を網羅的に検出するものではなく、件名・摘要や、請求書・見積書を作成したときの `partner_display_name` などはそのまま残ります（請求書の更新では `partner_display_name` や住所・担当者名もマスクします）。記録ファイルの扱いに注意してください。
 - **token をファイルに平文で保存しません。** 認証情報は 1Password に保管するか、実行時にだけメモリ上で扱います。
 
-> **エラー終了は「書き込まれていない」ことを意味しません。** 書き込み系コマンドは API へ送ってから読み戻し・記録保存をするため、送信後の結果不明・読み戻し失敗・記録保存の失敗でもエラー終了し、記録が `failed` になったり残らなかったりします。エラー終了したら、freee Web や `get` / `list` で対象を確かめるまで再実行しないでください。
+> **エラー終了は「書き込まれていない」ことを意味しません。** 書き込み系コマンドは API へ送ってから応答の確認・必要に応じた読み戻し・記録保存をするため、送信後の結果不明・読み戻し失敗・記録保存の失敗でもエラー終了し、記録が `failed` になったり残らなかったりします。エラー終了したら、freee Web や `get` / `list` で対象を確かめるまで再実行しないでください。
 
 ## 必要なもの
 
@@ -72,12 +72,17 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `invoices create` / `update` / `cancel` / `uncancel` | 書き込み（dry-run 既定） |
 | `quotations list` / `get` / `templates` | 読み取り |
 | `quotations create` / `cancel` / `uncancel` | 書き込み（dry-run 既定） |
+| `account-items list` / `taxes list` | 読み取り（勘定科目・税区分） |
+| `deals list` / `get <id>` | 読み取り |
+| `receipts get <id>` | 読み取り |
+| `deals create` | 書き込み（dry-run既定） |
+| `receipts upload` | 書き込み（dry-run既定） |
 | `expense list` | 読み取り |
 | `export receipts` / `journals` / `wallet-txns` / `expense-applications` | 読み取り（ローカルへ保存） |
 
 共通のオプション:
 
-- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get` は JSON 固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
+- `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get`と`account-items`・`taxes`・`deals`・`receipts`はJSON固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
 - `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）
 - `--task-id <id>`: audit log に記録する task ID
 - `--profile <name>`: 1Password 管理の OAuth で使う profile（`FREEE_OAUTH_PROFILE` でも指定可）
@@ -97,6 +102,65 @@ freee walletables list --company-id <company-id> --type bank_account
 
 - `--type` に `bank_account` / `credit_card` / `wallet` を指定すると口座の種類で絞り込む。省略すると全種類を返す。
 - 同期状況と最終同期日時を含める。残高は出さない。
+
+### 取引・証憑
+
+以下はすべて架空のID・名称・金額です。事業所・取引先・勘定科目・税区分は実行先の値に置き換えてください。
+
+```bash
+freee account-items list --company-id 1
+freee taxes list --company-id 1
+freee deals list --company-id 1 --partner-id 2 --type expense \
+  --start-issue-date 2026-01-01 --end-issue-date 2026-01-31 --status unsettled
+freee deals get 6 --company-id 1
+freee receipts get 5 --company-id 1
+```
+
+`deals list`のフィルターは任意です。`--type`は`income|expense`、`--status`は`settled|unsettled`を指定します。一覧は全ページを取得します。
+
+#### 証憑のアップロード（dry-run既定）
+
+```bash
+freee receipts upload --company-id 1 --file ./sample.pdf \
+  --issue-date 2026-01-15 --description '架空証憑'
+```
+
+ファイル名・バイト数・拡張子から推定したMIME・SHA-256・送信予定項目をJSONで表示します。dry-runでは認証も送信も行いません。実行する場合は表示されたハッシュを確認して、同じ引数に`--execute --expect-sha256 <確認したSHA-256>`を追加します。一致したバイト列をメモリ上に保持してmultipartで送信し、結果の`created.id`に`receipt.id`を出力します。ファイルの内容は監査ログに保存しません。
+
+#### 未決済取引の作成（dry-run既定）
+
+```bash
+freee deals create --company-id 1 --type expense --issue-date 2026-01-15 \
+  --due-date 2026-02-15 --partner-id 2 \
+  --detail 'account_item_id=3,tax_code=4,amount=1500,description=架空明細' \
+  --receipt-id 5 --ref-number sample-001
+```
+
+`--detail`と`--receipt-id`は繰り返し指定できます。明細はカンマ区切りの`key=value`形式で、摘要にカンマは使えません。`--due-date`・`--receipt-id`・`--ref-number`と明細の`description`は任意です。金額は税込の非負整数で、`payments`は送らず未決済で登録します。
+
+dry-runの出力例（架空の値）:
+
+```json
+{
+  "mode": "dry-run",
+  "payload": {
+    "company_id": 1,
+    "type": "expense",
+    "issue_date": "2026-01-15",
+    "due_date": "2026-02-15",
+    "partner_id": 2,
+    "details": [{"account_item_id": 3, "tax_code": 4, "amount": 1500, "description": "架空明細"}],
+    "receipt_ids": [5],
+    "ref_number": "sample-001"
+  },
+  "total": 1500,
+  "names": {"partner": "架空取引先", "accountItems": ["架空科目"], "taxes": ["架空税区分"]}
+}
+```
+
+名前の解決にはdry-runでも読み取りAPIと認証が必要です。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
+
+これら2つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
 
 ### 取引先
 

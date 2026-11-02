@@ -212,10 +212,14 @@ export class PublicFreeeClient {
       Accept: "application/json",
       ...(options?.headers ?? {}),
     };
-    let body: string | undefined;
+    let body: string | FormData | undefined;
     if (options && Object.prototype.hasOwnProperty.call(options, "body")) {
-      headers["Content-Type"] = "application/json";
-      body = JSON.stringify(options.body ?? {});
+      if (options.body instanceof FormData) {
+        body = options.body;
+      } else {
+        headers["Content-Type"] = "application/json";
+        body = JSON.stringify(options.body ?? {});
+      }
     }
 
     const response = await this.fetchFn(url.toString(), {
