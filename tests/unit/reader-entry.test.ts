@@ -30,6 +30,7 @@ describe("reader entry (read-only surface)", () => {
         "runExpenseList",
         "runInvoicesList",
         "runPartnersSearch",
+        "runReceiptsList",
         "runWalletTxnsList",
       ].sort(),
     );

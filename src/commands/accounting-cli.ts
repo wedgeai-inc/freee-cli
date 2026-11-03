@@ -13,6 +13,7 @@ import { runDealsPaymentsCreate } from "./deals/payments/create.js";
 import { appendAccountingAudit } from "../lib/audit/accounting-audit.js";
 import { runDealsCreate } from "./deals/create.js";
 import { runReceiptsGet } from "./receipts/get.js";
+import { runReceiptsList, validateReceiptsListOptions } from "./receipts/list.js";
 import { runReceiptsUpload } from "./receipts/upload.js";
 import { appendDealAudit } from "../lib/audit/deal-audit.js";
 import { appendReceiptAudit } from "../lib/audit/receipt-audit.js";
@@ -70,6 +71,21 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
     });
   const deals = program.command("deals").description("deal operations (default: dry-run)");
   const receipts = program.command("receipts").description("receipt operations (default: dry-run)");
+  company(receipts.command("list")).requiredOption("--start-date <YYYY-MM-DD>").requiredOption("--end-date <YYYY-MM-DD>")
+    .option("--user-name <text>").option("--number <n>").option("--comment-type <type>").option("--comment-important").option("--no-comment-important")
+    .option("--category <category>").option("--limit <n>").option("--offset <n>")
+    .action(async opts => {
+      if (opts.offset !== undefined && !/^[0-9]+$/.test(opts.offset)) throw new Error("--offset must be a non-negative integer");
+      const options = {
+        companyId: parseCompanyId(opts.companyId), startDate: opts.startDate, endDate: opts.endDate,
+        userName: opts.userName, number: opts.number === undefined ? undefined : parsePositiveIntegerOption(opts.number, "--number"),
+        commentType: opts.commentType, commentImportant: opts.commentImportant, category: opts.category,
+        limit: opts.limit === undefined ? undefined : parsePositiveIntegerOption(opts.limit, "--limit"),
+        offset: opts.offset === undefined ? undefined : Number(opts.offset),
+      };
+      validateReceiptsListOptions(options);
+      output((await runReceiptsList(options, { client: await getReadOnlyClient() })).items);
+    });
   company(deals.command("list")).option("--partner-id <id>").option("--type <type>").option("--start-issue-date <YYYY-MM-DD>").option("--end-issue-date <YYYY-MM-DD>").option("--status <status>")
     .action(async opts => output((await runDealsList({ companyId: parseCompanyId(opts.companyId), partnerId: opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id"), type: opts.type, startIssueDate: opts.startIssueDate, endIssueDate: opts.endIssueDate, status: opts.status }, { client: await getClient() })).items));
   for (const [root, run] of [[deals, runDealsGet], [receipts, runReceiptsGet]] as const) {

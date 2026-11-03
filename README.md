@@ -76,7 +76,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `quotations create` / `cancel` / `uncancel` | 書き込み（dry-run 既定） |
 | `account-items list` / `taxes list` | 読み取り（勘定科目・税区分） |
 | `deals list` / `get <id>` | 読み取り |
-| `receipts get <id>` | 読み取り |
+| `receipts list` / `get <id>` | 読み取り |
 | `deals create` | 書き込み（dry-run既定） |
 | `deals payments create <deal-id>` | 書き込み（dry-run既定） |
 | `receipts upload` | 書き込み（dry-run既定） |
@@ -140,9 +140,17 @@ freee deals list --company-id 1 --partner-id 2 --type expense \
   --start-issue-date 2026-01-01 --end-issue-date 2026-01-31 --status unsettled
 freee deals get 6 --company-id 1
 freee receipts get 5 --company-id 1
+freee receipts list --company-id 1 --start-date 2026-02-01 --end-date 2026-02-28
+freee receipts list --company-id 1 --start-date 2026-02-01 --end-date 2026-02-28 \
+  --user-name 架空ユーザー --comment-type posted --comment-important \
+  --category without_deal --limit 50 --offset 0
 ```
 
 `deals list`のフィルターは任意です。`--type`は`income|expense`、`--status`は`settled|unsettled`を指定します。一覧は全ページを取得します。
+
+`receipts list`はアップロード日を`--start-date`・`--end-date`で指定し、JSON配列を返します。任意のフィルターは`--user-name`（表示名またはメールアドレスの部分一致）・`--number`（正の整数）・`--comment-type`（`posted|raised|resolved`）・`--comment-important` / `--no-comment-important`・`--category`（`all|without_deal|with_expense_application_line|with_deal|ignored`）です。コメント重要度は`--comment-important`で`true`、`--no-comment-important`で`false`を指定でき、両方を省略すると`comment_important`クエリを送信しません。ページ指定がなければ100件ずつ全ページを取得し、`--limit`（1〜3000）または`--offset`（0以上）を指定すると1ページだけ取得します。`--offset`だけ指定した場合も100件を取得します。
+
+一覧にはSHA-256などのファイル内容のハッシュに相当する項目がありません。重複確認にはメモ（`description`）・アップロード日時（`created_at`）・アップロードしたユーザーを使います。
 
 #### 証憑のアップロード（dry-run既定）
 
