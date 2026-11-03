@@ -33,3 +33,20 @@ it("自由文字列中のBearer値もマスクする", async () => {
     expect(text).not.toContain("fictional-");
   } finally { await rm(dir, { recursive: true }); }
 });
+
+it("guard_failedと真偽値のguardsをJSONLへ保存して読み戻せる", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "freee-audit-test-"));
+  try {
+    const guards = { amountMatchesDue: false, companyMatches: true };
+    await appendAccountingAudit(dir, { timestamp: "2026-01-15T00:00:00.000Z", task_id: "sample", event: "deal_payment_create", mode: "dry-run", status: "guard_failed", company_id: 1, payload_redacted: {}, guards });
+    expect(JSON.parse(await readFile(join(dir, "freee-deal-payment-create-2026-01-15.jsonl"), "utf8"))).toMatchObject({ status: "guard_failed", guards });
+  } finally { await rm(dir, { recursive: true }); }
+});
+
+it("guardsの真偽値以外の値は書き込む前に拒否する", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "freee-audit-test-"));
+  try {
+    await expect(appendAccountingAudit(dir, { timestamp: "2026-01-15T00:00:00.000Z", task_id: "sample", event: "wallet_txn_reconcile", mode: "dry-run", status: "guard_failed", company_id: 1, payload_redacted: {}, guards: { description: "fictional-private-description" } as unknown as Record<string, boolean> })).rejects.toThrow("audit guards must contain only boolean values");
+    expect(await readdir(dir)).toEqual([]);
+  } finally { await rm(dir, { recursive: true }); }
+});
