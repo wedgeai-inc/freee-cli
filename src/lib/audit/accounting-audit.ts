@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { secureAppend } from "./secure-append.js";
 import { join } from "node:path";
 import { redact } from "./redactor.js";
 
@@ -30,6 +30,5 @@ export async function appendAccountingAudit(logDir: string, entry: AccountingAud
     created_id: entry.created_id, write_state: entry.write_state, reason: redactAccountingPayload(entry.reason),
     filename: entry.filename === undefined ? undefined : redactAccountingPayload(entry.filename), sha256: entry.sha256,
   };
-  mkdirSync(logDir, { recursive: true });
-  appendFileSync(join(logDir, `freee-${entry.event.replaceAll("_", "-")}-${entry.timestamp.slice(0, 10)}.jsonl`), `${JSON.stringify(safe)}\n`, "utf8");
+  secureAppend(join(logDir, `freee-${entry.event.replaceAll("_", "-")}-${entry.timestamp.slice(0, 10)}.jsonl`), `${JSON.stringify(safe)}\n`);
 }

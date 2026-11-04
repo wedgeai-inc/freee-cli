@@ -14,6 +14,7 @@ export interface InvoiceSummary {
   /** freee 請求書 API スキーマ（iv/open-api-3）の 5 値 */
   payment_status: "settled" | "unsettled" | "canceled" | "unprocessed" | "failed";
   deal_status: "registered" | "unregistered";
+  deal_id?: number | null;
   cancel_status: "canceled" | "uncanceled";
 }
 
@@ -73,6 +74,7 @@ export function toInvoiceSummary(raw: Record<string, unknown>): InvoiceSummary {
     deal_status: str(raw.deal_status) as InvoiceSummary["deal_status"],
     cancel_status: str(raw.cancel_status) as InvoiceSummary["cancel_status"],
   };
+  if (raw.deal_id === null || typeof raw.deal_id === "number") out.deal_id = raw.deal_id;
   const pd = optStr(raw.payment_date);
   if (pd !== undefined) out.payment_date = pd;
   const pn = optStr(raw.partner_name);

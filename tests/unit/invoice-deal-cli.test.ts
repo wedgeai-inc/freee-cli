@@ -1,62 +1,52 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createProgram } from "../../src/cli.js";
-import { appendDealAudit } from "../../src/lib/audit/deal-audit.js";
-vi.mock("../../src/lib/token-config-loader.js", () => ({ loadApiAuth: vi.fn(async () => ({ accessToken: "test-token" })) }));
-vi.mock("../../src/lib/audit/deal-audit.js", () => ({ appendDealAudit: vi.fn(async () => {}) }));
+import { Command } from "commander";
+import { registerAccountingCommands } from "../../src/commands/accounting-cli.js";
+
 afterEach(() => vi.restoreAllMocks());
-const args = ["deals", "create", "--company-id", "1", "--type", "income", "--issue-date", "2026-01-15", "--due-date", "2026-02-15", "--partner-id", "2", "--detail", "account_item_id=3,tax_code=4,amount=1500", "--invoice-id", "8", "--expect-invoice-number", "SAMPLE-8"];
-function mockApi(registered = false) {
-  let reads = 0;
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
-    const path = new URL(String(url)).pathname;
-    const body = path === "/iv/invoices/8" ? { invoice: { id: 8, company_id: 1, invoice_number: "SAMPLE-8", cancel_status: "uncanceled", deal_status: ++reads > 1 && registered ? "registered" : "unregistered", deal_id: reads > 1 && registered ? 6 : null, total_amount: 1500, partner_id: 2, billing_date: "2026-01-15", payment_date: "2026-02-15" } }
-      : path.endsWith("account_items") ? { account_items: [{ id: 3, name: "架空科目" }] }
-      : path.includes("taxes") ? { taxes: [{ code: 4, name: "架空税区分" }] }
-      : path.includes("partners/") ? { partner: { id: 2, company_id: 1, name: "架空取引先" } }
-      : init?.method === "POST" ? { deal: { id: 6, company_id: 1 } } : { deals: [] };
-    return new Response(JSON.stringify(body));
-  });
-}
-it("CLIの請求書確認オプションはdry-runで請求書を読み、POSTしない", async () => {
-  const fetchFn = mockApi();
-  const log = vi.spyOn(console, "log").mockImplementation(() => {});
-  await createProgram().exitOverride().parseAsync(args, { from: "user" });
-  expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({ mode: "dry-run", invoiceCheck: { id: 8 } });
-  expect(fetchFn.mock.calls.some(c => new URL(String(c[0])).pathname === "/iv/invoices/8")).toBe(true);
-  expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
-});
-it("CLIのexecuteは請求書が未登録のままなら警告を含む例外を上位へ返す", async () => {
-  const fetchFn = mockApi();
-  const log = vi.spyOn(console, "log").mockImplementation(() => {});
-  await expect(createProgram().parseAsync([...args, "--execute", "--expect-total", "1500"], { from: "user" })).rejects.toThrow(/警告.*作成済み.*再実行/);
-  expect(fetchFn.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
-  expect(log).not.toHaveBeenCalled();
-  expect(appendDealAudit).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ reason: "invoice_readback_failed", write_state: "succeeded", created_id: 6 }));
-});
-it("CLIのexecuteは登録と取引IDの一致を確認してJSONを返す", async () => {
-  mockApi(true);
-  const log = vi.spyOn(console, "log").mockImplementation(() => {});
-  await createProgram().parseAsync([...args, "--execute", "--expect-total", "1500"], { from: "user" });
-  expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toMatchObject({ invoiceReadback: { deal_status: "registered", deal_id: 6 } });
-});
-it("CLI入口は請求書読み戻し失敗の警告を標準エラーに出し終了コード1を設定する", async () => {
-  const previousArgs = process.argv;
-  const previousExitCode = process.exitCode;
-  mockApi();
-  const error = vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.spyOn(console, "log").mockImplementation(() => {});
-  try {
-    vi.resetModules();
-    vi.doMock("../../src/lib/main-module.js", () => ({ isMainModule: () => true }));
-    process.argv = [previousArgs[0]!, "synthetic-cli", ...args, "--execute", "--expect-total", "1500"];
-    process.exitCode = undefined;
-    await import("../../src/cli.js");
-    await vi.waitFor(() => expect(process.exitCode).toBe(1));
-    expect(error).toHaveBeenCalledWith(expect.stringMatching(/警告.*作成済み.*再実行/));
-  } finally {
-    process.argv = previousArgs;
-    process.exitCode = previousExitCode;
-    vi.doUnmock("../../src/lib/main-module.js");
-    vi.resetModules();
+const args = ["deals", "create", "--company-id", "1", "--type", "income", "--issue-date", "2026-01-15", "--partner-id", "2", "--detail", "account_item_id=3,tax_code=4,amount=1500"];
+it("CLIは請求書指定・確認番号をdry-runとexecuteの両方で認証前に拒否する", async () => {
+  for (const option of [["--invoice-id", "8"], ["--expect-invoice-number", "SAMPLE-8"], ["--invoice-id", "8", "--expect-invoice-number", "SAMPLE-8"]]) {
+    for (const mode of [[], ["--execute"]]) {
+      const getClient = vi.fn().mockRejectedValue(new Error("認証に到達"));
+      const fetchFn = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("通信に到達"));
+      const program = new Command();
+      registerAccountingCommands(program, getClient, getClient);
+      await expect(program.parseAsync([...args, ...option, ...mode], { from: "user" })).rejects.toThrow(/公開API.*紐付け.*Web画面/);
+      expect(getClient).not.toHaveBeenCalled();
+      expect(fetchFn).not.toHaveBeenCalled();
+    }
   }
+});
+
+it("CLIの取引一覧は管理番号を渡し、JSON配列を維持する", async () => {
+  const { PublicFreeeClient } = await import("../../src/lib/clients/freee-public-client.js");
+  const fetchFn = vi.fn(async () => new Response(JSON.stringify({ deals: [{ id: 6, ref_number: "SAMPLE-8" }, { id: 7, ref_number: "SAMPLE-80" }] })));
+  const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "test-token", fetchFn });
+  const getClient = vi.fn(async () => client);
+  const program = new Command();
+  registerAccountingCommands(program, getClient, getClient);
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  await program.parseAsync(["deals", "list", "--company-id", "1", "--ref-number", "SAMPLE-8"], { from: "user" });
+  expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual([{ id: 6, ref_number: "SAMPLE-8" }]);
+});
+
+it("CLIは空の管理番号を認証前に拒否し、0件・複数件では結果を出力しない", async () => {
+  const { PublicFreeeClient } = await import("../../src/lib/clients/freee-public-client.js");
+  const fetchFn = vi.fn(async () => new Response(JSON.stringify({ deals: [] })));
+  const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "test-token", fetchFn });
+  const getClient = vi.fn(async () => client);
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  for (const refNumber of ["", " ", "　"]) {
+    const program = new Command().exitOverride();
+    registerAccountingCommands(program, getClient, getClient);
+    await expect(program.parseAsync(["deals", "list", "--company-id", "1", "--ref-number", refNumber], { from: "user" })).rejects.toThrow(/--ref-number.*空/);
+  }
+  expect(getClient).not.toHaveBeenCalled();
+  for (const count of [0, 2]) {
+    fetchFn.mockImplementation(async () => new Response(JSON.stringify({ deals: Array.from({ length: count }, (_, i) => ({ id: i + 1, ref_number: "SAMPLE-8" })) })));
+    const program = new Command().exitOverride();
+    registerAccountingCommands(program, getClient, getClient);
+    await expect(program.parseAsync(["deals", "list", "--company-id", "1", "--ref-number", "SAMPLE-8"], { from: "user" })).rejects.toThrow(`${count}件`);
+  }
+  expect(log).not.toHaveBeenCalled();
 });
