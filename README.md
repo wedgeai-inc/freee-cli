@@ -86,7 +86,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 共通のオプション:
 
 - `--format json|table`: 読み取り系の出力形式（既定 `json`）。`partners get`と`account-items`・`taxes`・`deals`・`receipts`・`wallet-txns`はJSON固定です。`export` は `--format` に対応せず、標準出力には件数や保存先などの実行結果を表示し、データは `--out` のファイルへ保存します
-- `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）
+- `--log-dir <path>`: 書き込み系の audit log の出力先（既定 `./audit-logs`）。監査ログファイルは600で作成し、既存ファイルの権限が緩い場合は追記前に600へ変更します。新規ディレクトリは中間ディレクトリを含め700で作成し、既存ディレクトリの権限は変更しません。umaskがさらに厳しい場合、新規ファイル・ディレクトリの権限もさらに制限されます。
 - `--task-id <id>`: audit log に記録する task ID
 - `--profile <name>`: 1Password 管理の OAuth で使う profile（`FREEE_OAUTH_PROFILE` でも指定可）
 
