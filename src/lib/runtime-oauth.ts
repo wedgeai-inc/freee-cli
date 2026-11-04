@@ -9,7 +9,7 @@ const LEGACY_EXPORT_SUBCOMMANDS = new Set([
   "expense-applications",
 ]);
 
-const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
+export const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string, ...string[]]> = [
   ["export", "journals"],
   ["export", "receipts"],
   ["export", "wallet-txns"],
@@ -20,6 +20,14 @@ const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string]> = [
   ["deals", "list"],
   ["deals", "get"],
   ["deals", "create"],
+  // listはGETのみ。reconcileとpayments createはdry-run既定で、executeには
+  // --expect-amountの完全一致と事業所・残額・日付等のガードを要求する。
+  // 両writeはplanned / attempting / succeeded / failedを監査し、送信前監査失敗なら送信しない。
+  // reconcileの--expect-dateは任意。これらの検証は各コマンドの実装に委ねる。
+  ["wallet-txns", "list"],
+  ["wallet-txns", "reconcile"],
+  ["walletables", "list"],
+  ["deals", "payments", "create"],
   ["receipts", "get"],
   ["receipts", "upload"],
   ["partners", "search"],
@@ -177,12 +185,15 @@ export function parseRuntimePlan(text: string): RuntimePlan {
  */
 export function normalizeLegacyExportCommand(command: string[]): string[] {
   const receiptCommand = command[0] === "receipts" && ["get", "upload"].includes(command[1] ?? "");
-  return !receiptCommand && LEGACY_EXPORT_SUBCOMMANDS.has(command[0] as string) ? ["export", ...command] : [...command];
+  // 旧wallet-txns形式はオプションから始まる。位置引数は現行CLIの
+  // サブコマンドとして扱い、未知の名前をexportの許可へ迂回させない。
+  const walletCommand = command[0] === "wallet-txns" && command[1] !== undefined && !command[1].startsWith("-");
+  return !receiptCommand && !walletCommand && LEGACY_EXPORT_SUBCOMMANDS.has(command[0] as string) ? ["export", ...command] : [...command];
 }
 
 function isAllowlistedRuntimeCommand(command: readonly string[]): boolean {
   return RUNTIME_PLAN_ALLOWLIST.some(
-    ([root, subcommand]) => command[0] === root && command[1] === subcommand,
+    (prefix) => prefix.every((part, index) => command[index] === part),
   );
 }
 
