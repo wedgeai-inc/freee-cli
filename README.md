@@ -195,6 +195,20 @@ dry-runの出力例（架空の値）:
 
 名前の解決と重複検知にはdry-runでも読み取りAPIと認証が必要です。dry-runでも全ページを照合し、`duplicateCheck`に重複の有無・一致した取引ID・実行時に阻止されるか（重複あり、かつ`--allow-duplicate`なし）を返します。重複があってもdry-runは例外にせず報告し、APIへの書き込みは行いません。`--expect-total`を指定すると、`checks.expectTotal`に期待値・明細合計・一致結果を返し、不一致でも報告のみです。確認オプション未指定なら`checks`は追加しません。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
 
+請求書に対応する収入取引を登録する場合は、`--invoice-id`で登録前後の状態を確認できます（[調査結果と制約](docs/invoice-deal-link.md)）。このオプション自体は請求書と取引を紐付けません。
+
+```bash
+# ID・番号・金額は架空。既定はdry-run
+freee deals create --company-id 1 --type income --issue-date 2026-01-15 \
+  --due-date 2026-02-15 --partner-id 2 \
+  --detail 'account_item_id=3,tax_code=4,amount=1500' --invoice-id 8
+# 個別承認後、同じ引数に --execute --expect-total 1500 --expect-invoice-number SAMPLE-8 を追加
+```
+
+請求書が未取消かつ`deal_status=unregistered`で、金額・取引先・請求日（取引の発生日）・期日が一致する場合だけ進みます。登録後は請求書を読み戻し、`deal_status=registered`と`deal_id`が作成した取引IDに一致することを確認します。未登録のまま、別取引、取得失敗などでは、作成済みIDを含む警告と終了コード1を返します。取引は既に作成されているため、自動で再実行しないでください。
+
+**二重計上の注意:**CLIで取引を作成した後、画面から請求書の「取引登録」を行うと、別の売掛金が立ち二重計上になるおそれがあります。警告が出た場合は画面で追加登録せず、`invoices get`と`deals get`で状態を確認してください。この確認は同時実行や後日の画面操作を排他しません。監査ログの`succeeded`は取引作成の成功で、後続の`failed`（`invoice_readback_failed`）は請求書確認の失敗を表します。
+
 #### 取引の支払行の作成（dry-run既定）
 
 ```bash
@@ -305,6 +319,7 @@ freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json
 
 ```bash
 freee invoices list --company-id 1234567 --start-billing-date 2026-09-01 --end-billing-date 2026-09-30 --format table
+freee invoices list --company-id 1234567 --start-payment-date 2026-10-01 --end-payment-date 2026-10-31 --cancel-status uncanceled --format table --with-status-details
 freee invoices get --company-id 1234567 --id 123 --format json
 freee invoices templates --company-id 1234567 --format table
 ```
@@ -312,7 +327,12 @@ freee invoices templates --company-id 1234567 --format table
 `freee invoices next-number --company-id <company-id> --prefix ABC`は、取消済みを含む既存の請求書から`ABC-001`形式の次の番号を計算します。`--partner-id <partner-id>`で取引先の一致を確認でき、同じ接頭辞が複数の取引先に使われている場合は停止します。`--width 4`で最小桁数を指定でき（1〜10、既定3）、既存番号の桁数は維持します。出力は既定JSON、`--format table`で表形式です。全ページを取得できない場合は番号を返しません。番号の予約や帳票への書き込みは行いません。freee販売から作られた帳票も含めて数えます（freee販売の帳票へのアクセス権限が無い場合はAPIがエラーを返し、番号は返しません）。
 
 - `list` は `--partner-ids 1,2,3`（最大3件）、`--sending-status sent|unsent`、`--payment-status settled|unsettled|canceled|unprocessed|failed` で絞り込めます。
-- freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。上限に達すると終了コード 1 で終わり、取得済みの分も出力しません（ちょうど 10,000 件でも失敗します）。件数が多い場合は `--start-billing-date` / `--end-billing-date` で期間を絞ってください。
+- `--start-payment-date YYYY-MM-DD` / `--end-payment-date YYYY-MM-DD`は、期日（`payment_date`）の下限・上限を当日を含めて指定します。片側のみの指定も可能です。実在しない日付と下限が上限を超える指定は認証前に拒否します。
+- 期日はAPIクエリ`start_payment_date`・`end_payment_date`で絞り込みます。取消状態が`uncanceled`・`canceled`の場合は`cancel_status`も送信し、`all`または未指定の場合は送信しません。取得件数の上限は、APIで絞り込んだ後の結果に適用します。対応するクエリは[freee公式OpenAPIの`GET /invoices`](https://github.com/freee/freee-api-schema/blob/master/iv/open-api-3/api-schema.yml)に定義されています。
+- `--cancel-status all|uncanceled|canceled`の既定は`all`で、従来どおり取消済みも含めます。`uncanceled`は未取消のみ、`canceled`は取消済みのみを残します。未知・空の取消状態は、要確認として請求書ID付きの警告を標準エラーへ出し、`all`では保持、状態指定時は除外します（期日条件は別途適用）。
+- 期日範囲を指定した場合、APIから返った期日が未設定・空・不正・指定範囲外の行は範囲に含めず、要確認として請求書ID付きの警告を標準エラーへ出します。期日範囲を指定しなければその行も保持します。警告はJSON配列や表の標準出力へ混ぜません。
+- 表の既定列とJSON配列の形式は維持します。`--format table --with-status-details`で末尾に`payment_date`・`cancel_status`・`deal_status`を追加できます。`payment_status`は既定の表にも含まれます。期日の空欄は空セルになります。
+- freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。上限に達すると終了コード 1 で終わり、取得済みの分も出力しません（ちょうど 10,000 件でも失敗します）。件数が多い場合は`--start-billing-date` / `--end-billing-date`または`--start-payment-date` / `--end-payment-date`で期間を絞ってください。
 - `invoices list`は、freee販売から作成された請求書を含める `sales_management_origin` には対応していません。
 - PDF の取得・請求書の送付は freee 請求書 API にないため、Web で行ってください。
 
@@ -499,15 +519,63 @@ profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFIL
 
 従来の `~/.config/freee-mcp/tokens.json` は通常 CLI の token 管理元としては使用しない。`FREEE_ACCESS_TOKEN` は runtime OAuth が子プロセスへ token を渡す経路と、手元での一時的な利用のためのもので、永続保存先ではない。設定されていると `--profile` より優先される。
 
-## credential を保存しない runtime OAuth（read-only export と invoices / quotations / partners write に共用）
+## credentialを保存しないruntime OAuth
 
 `FREEE_CLIENT_ID`と`FREEE_CLIENT_SECRET`をruntime注入し、ローカルの`/start`をブラウザで開く。callbackの認可コードをメモリ上でtokenへ交換し、Access Tokenを検証済みのCLI runtime plan にだけ渡す。token、code、secret、stateはファイルや標準出力へ保存しない。
 
-plan v2 は CLI ルートからの引数配列を `commands` に含むJSONで、最大500コマンド・1 コマンドあたり引数 64 個まで受け付ける（旧形式を正規化したあとの数で数える）。許可される先頭2要素は `export journals` / `export receipts` / `export wallet-txns` / `export expense-applications`、`companies list`、`partners search` / `create` / `get` / `update`、`invoices list` / `get` / `templates` / `create` / `update` / `cancel` / `uncancel`、`quotations list` / `get` / `templates` / `create` / `cancel` / `uncancel` のみである。旧形式の `journals` などの export subcommand は `export journals` に正規化して互換実行する。任意のshell・実行ファイル・`expense` / `auth` 等の未許可コマンドは拒否する。
+plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最大500コマンド・1コマンドあたり引数64個まで受け付ける（旧形式を正規化したあとの数で数える）。次の表にあるコマンドの接頭辞だけを許可する。`deals payments create`は先頭3要素、それ以外は先頭2要素を照合する。
+
+<!-- runtime-plan-allowlist:start -->
+| 許可するコマンドの接頭辞 |
+| --- |
+| `export journals` |
+| `export receipts` |
+| `export wallet-txns` |
+| `export expense-applications` |
+| `companies list` |
+| `account-items list` |
+| `taxes list` |
+| `deals list` |
+| `deals get` |
+| `deals create` |
+| `wallet-txns list` |
+| `wallet-txns reconcile` |
+| `walletables list` |
+| `deals payments create` |
+| `receipts get` |
+| `receipts upload` |
+| `partners search` |
+| `partners create` |
+| `partners get` |
+| `partners update` |
+| `invoices list` |
+| `invoices get` |
+| `invoices templates` |
+| `invoices create` |
+| `invoices cancel` |
+| `invoices uncancel` |
+| `invoices update` |
+| `quotations list` |
+| `quotations get` |
+| `quotations templates` |
+| `quotations create` |
+| `quotations cancel` |
+| `quotations uncancel` |
+<!-- runtime-plan-allowlist:end -->
+
+旧形式の`journals`などのexportサブコマンドは`export journals`に正規化して互換実行する。`wallet-txns --company-id …`も旧export形式として扱うが、`wallet-txns list|reconcile`は現行CLIのまま実行する。任意のshell・実行ファイル・`expense` / `auth`等の未許可コマンドや、`deals payments delete`等の未許可の兄弟コマンドは拒否する。
+
+追加した4コマンドの許可理由:
+
+- `wallet-txns list`と`walletables list`はGETのみで、APIへの書き込みがない。
+- `wallet-txns reconcile`と`deals payments create`はdry-runが既定で、`--execute`時には`--expect-amount`が必須。指定金額との完全一致に加え、事業所・残額・日付等を検証してから書き込む。消込の`--expect-date`は任意で、指定時は明細日付と完全一致を要求する。
+- 書き込み系2件はdry-runで`planned`、実行時に`attempting`と結果の`succeeded|failed`を監査ログへ残す。送信前監査が失敗すると送信しない。入力形式の不備や必須オプション不足は監査より前に拒否される。許可リストは認可操作や実行承認の代わりにはならない。
+
+`deals create`と`receipts upload`もdry-runが既定で、`--execute`時に書き込む。これらを含め、実行前に対象とplan内容を確認すること。
 
 `invoices create` / `update` / `cancel` / `uncancel`、`quotations create` / `cancel` / `uncancel`、`partners create`、`partners update` は dry-run が既定だが、plan に `--execute` を含めると runtime OAuth 経由でも実際に API write をする。`invoices update --execute` / `cancel --execute` / `uncancel --execute` には `--expect-invoice-number` が、`quotations cancel --execute` / `uncancel --execute` には `--expect-quotation-number` が、`partners update --execute` には `--expect-name` が必須である。実行前に対象と plan 内容を確認すること。
 
-- 事前の検証は、plan の形・コマンド数・許可された先頭 2 要素までで、各コマンドのオプションや参照先の plan JSON の中身は実行時に検証される。
+- 事前の検証は、planの形・コマンド数・上表の接頭辞までで、各コマンドのオプションや参照先のplan JSONの中身は実行時に検証される。
 - `commands` は**先頭から 1 つずつ実行し、失敗した時点で止まる**。先に成功した書き込みは取り消さず、途中から再開する機能もない。失敗したら各コマンドの結果を確かめ、実行済みの作成コマンドを含む plan を丸ごと再実行しない。
 - `commands` の中の相対パス（`--plan` / `--out` / `--log-dir`）は、runtime plan ファイルの場所ではなく**リポジトリのルートを基準**に解決される。リポジトリの外のファイルは絶対パスで書く。
 

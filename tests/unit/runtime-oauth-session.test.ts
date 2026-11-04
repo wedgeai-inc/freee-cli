@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { parseRuntimePlan } from "../../src/lib/runtime-oauth.js";
 import {
   RuntimeOAuthGate,
   runExportPlan,
@@ -29,6 +30,30 @@ describe("RuntimeOAuthGate", () => {
 });
 
 describe("runRuntimePlan", () => {
+  it("消込planの4コマンドを検証してCLI引数とexecuteガードをそのまま子へ渡す", async () => {
+    const commands = [
+      ["wallet-txns", "list", "--company-id", "1"],
+      ["walletables", "list", "--company-id", "1"],
+      ["wallet-txns", "reconcile", "8", "--company-id", "1", "--deal-id", "6", "--amount", "123", "--execute", "--expect-amount", "123", "--expect-date", "2026-01-15"],
+      ["deals", "payments", "create", "6", "--company-id", "1", "--date", "2026-01-15", "--from-walletable-type", "wallet", "--from-walletable-id", "2", "--amount", "123", "--execute", "--expect-amount", "123"],
+    ];
+    const spawnFn = vi.fn(() => {
+      const child = new EventEmitter() as ExportChild;
+      child.kill = vi.fn(() => true);
+      queueMicrotask(() => { child.emit("spawn"); child.emit("exit", 0); });
+      return child;
+    });
+    const options = { cliPath: "/repo/src/cli.ts", cwd: "/repo", baseEnv: {}, expiresIn: 60, spawnFn };
+    await runRuntimePlan(parseRuntimePlan(JSON.stringify({ commands })), "synthetic-token", options);
+    expect(spawnFn.mock.calls).toEqual(commands.map(command => [
+      process.execPath, ["--import", "tsx", options.cliPath, ...command],
+      { cwd: options.cwd, env: { FREEE_ACCESS_TOKEN: "synthetic-token" }, stdio: "inherit" },
+    ]));
+    spawnFn.mockClear();
+    expect(() => parseRuntimePlan(JSON.stringify({ commands: [["deals", "payments", "delete", "6"]] }))).toThrow("Invalid runtime plan command");
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
   it("runs allowlisted CLI routes sequentially with a safe env and no token argv leak", async () => {
     const calls: Array<{ executable: string; args: string[]; env?: NodeJS.ProcessEnv }> = [];
     const spawnFn = vi.fn((executable: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv }) => {
