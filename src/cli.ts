@@ -117,6 +117,10 @@ export function createProgram(): Command {
     .requiredOption("--company-id <id>", "freee company ID")
     .option("--start-billing-date <YYYY-MM-DD>", "billing date lower bound")
     .option("--end-billing-date <YYYY-MM-DD>", "billing date upper bound")
+    .option("--start-payment-date <YYYY-MM-DD>", "inclusive payment date lower bound (client-side; does not reduce fetched pages)")
+    .option("--end-payment-date <YYYY-MM-DD>", "inclusive payment date upper bound (client-side; missing/invalid dates excluded with stderr warnings)")
+    .option("--cancel-status <status>", "client-side: all (default), uncanceled, or canceled; unknown states warn on stderr")
+    .option("--with-status-details", "append payment_date, cancel_status, deal_status to table (payment_status is always shown)")
     .option("--partner-ids <csv>", "up to three comma-separated partner IDs")
     .option("--sending-status <status>", "sent or unsent")
     .option("--payment-status <status>", "settled, unsettled, canceled, unprocessed, or failed")
@@ -126,6 +130,9 @@ export function createProgram(): Command {
       // 入力検証は認証ロード（token refresh の fetch を伴いうる）より前に行う
       const listOpts: InvoicesListOptions = {
         companyId: parseCompanyId(opts.companyId),
+        startPaymentDate: opts.startPaymentDate,
+        endPaymentDate: opts.endPaymentDate,
+        cancelStatus: opts.cancelStatus,
         startBillingDate: opts.startBillingDate,
         endBillingDate: opts.endBillingDate,
         partnerIds: opts.partnerIds,
@@ -137,7 +144,8 @@ export function createProgram(): Command {
       const auth = await loadPublicApiAuth();
       const client = createInvoiceClient({ token: auth.accessToken });
       const result = await runInvoicesList(listOpts, { client });
-      console.log(formatInvoicesList(result, format));
+      for (const warning of result.warnings ?? []) console.warn(warning);
+      console.log(formatInvoicesList(result, format, Boolean(opts.withStatusDetails)));
     });
 
   invoices
