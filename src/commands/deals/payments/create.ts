@@ -76,7 +76,7 @@ export async function runDealsPaymentsCreate(opts: DealsPaymentsCreateOptions, d
   }
   const dealSummary = { id: deal.id, type: deal.type, issue_date: deal.issue_date, amount: deal.amount, due_amount: deal.due_amount, partner_id: partnerId, partner_name: partnerName };
   if (!opts.execute) {
-    await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), status: "planned" });
+    await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), ...(failedGuards.length > 0 ? { status: "guard_failed", guards } as const : { status: "planned" } as const) });
     return { mode, payload, names, guards, deal: dealSummary };
   }
   const created = await auditedAccountingWrite(base, deps, () => client.post(`${path}/payments`, { body: payload }), "deal");

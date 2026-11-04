@@ -33,7 +33,7 @@ function expectedTotal(raw: string | undefined): number | undefined {
   return Number(raw);
 }
 function parseOffset(raw: string): number {
-  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error("--offset must be a non-negative safe integer");
+  if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) > 2147483647) throw new Error("--offset must be an integer between 0 and 2147483647");
   return Number(raw);
 }
 export function registerAccountingCommands(program: Command, getClient: () => Promise<PublicFreeeClient>, getReadOnlyClient: () => Promise<ReadOnlyClient>): void {
