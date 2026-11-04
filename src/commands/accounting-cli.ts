@@ -7,7 +7,7 @@ import type { PublicFreeeClient } from "../lib/clients/freee-public-client.js";
 import { parseCompanyId, parsePositiveIntegerOption } from "../lib/company-id.js";
 import { runAccountItemsList } from "./account-items/list.js";
 import { runTaxesList } from "./taxes/list.js";
-import { runDealsList } from "./deals/list.js";
+import { runDealsList, validateDealRefNumber } from "./deals/list.js";
 import { runDealsGet } from "./deals/get.js";
 import { runDealsPaymentsCreate } from "./deals/payments/create.js";
 import { appendAccountingAudit } from "../lib/audit/accounting-audit.js";
@@ -86,14 +86,17 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
       validateReceiptsListOptions(options);
       output((await runReceiptsList(options, { client: await getReadOnlyClient() })).items);
     });
-  company(deals.command("list")).option("--partner-id <id>").option("--type <type>").option("--start-issue-date <YYYY-MM-DD>").option("--end-issue-date <YYYY-MM-DD>").option("--status <status>")
-    .action(async opts => output((await runDealsList({ companyId: parseCompanyId(opts.companyId), partnerId: opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id"), type: opts.type, startIssueDate: opts.startIssueDate, endIssueDate: opts.endIssueDate, status: opts.status }, { client: await getClient() })).items));
+  company(deals.command("list")).option("--partner-id <id>").option("--type <type>").option("--start-issue-date <YYYY-MM-DD>").option("--end-issue-date <YYYY-MM-DD>").option("--status <status>").option("--ref-number <text>", "全ページ取得後に管理番号で完全一致検索し、1件だけの場合に成功")
+    .action(async opts => {
+      validateDealRefNumber(opts.refNumber);
+      output((await runDealsList({ companyId: parseCompanyId(opts.companyId), partnerId: opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id"), type: opts.type, startIssueDate: opts.startIssueDate, endIssueDate: opts.endIssueDate, status: opts.status, refNumber: opts.refNumber }, { client: await getClient() })).items);
+    });
   for (const [root, run] of [[deals, runDealsGet], [receipts, runReceiptsGet]] as const) {
     company(root.command("get <id>")).action(async (id, opts) => output(await run({ companyId: parseCompanyId(opts.companyId), id: parsePositiveIntegerOption(id, "id") }, { client: await getClient() })));
   }
   writeOptions(deals.command("create")).requiredOption("--type <type>", "income or expense").requiredOption("--issue-date <YYYY-MM-DD>").option("--due-date <YYYY-MM-DD>")
     .requiredOption("--partner-id <id>").requiredOption("--detail <detail>", "account_item_id=...,tax_code=...,amount=...,description=... (repeatable)", collect, [])
-    .option("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--ref-number <text>").option("--expect-total <amount>").option("--allow-duplicate").option("--invoice-id <id>", "check invoice before and after income creation; does not link it").option("--expect-invoice-number <number>")
+    .option("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--ref-number <text>").option("--expect-total <amount>").option("--allow-duplicate").option("--invoice-id <id>", "公開APIでは請求書と取引を紐付けできないため、指定するとエラー").option("--expect-invoice-number <number>", "取引作成では非対応。指定するとエラー")
     .action(async opts => output(await runDealsCreate({ companyId: parseCompanyId(opts.companyId), type: opts.type, issueDate: opts.issueDate, dueDate: opts.dueDate, partnerId: parsePositiveIntegerOption(opts.partnerId, "--partner-id"), details: opts.detail, receiptIds: opts.receiptId.map((id: string) => parsePositiveIntegerOption(id, "--receipt-id")), refNumber: opts.refNumber, execute: Boolean(opts.execute), expectTotal: expectedTotal(opts.expectTotal), allowDuplicate: Boolean(opts.allowDuplicate), invoiceId: opts.invoiceId === undefined ? undefined : parsePositiveIntegerOption(opts.invoiceId, "--invoice-id"), expectInvoiceNumber: opts.expectInvoiceNumber, logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendDealAudit(opts.logDir, entry), now: () => new Date() })));
   writeOptions(deals.command("payments").command("create <deal-id>"))
     .requiredOption("--date <YYYY-MM-DD>").requiredOption("--from-walletable-type <type>")
