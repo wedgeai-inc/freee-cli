@@ -1,38 +1,39 @@
-# 請求書と取引の紐付け確認
+# 請求書と取引の紐付け方針
 
-## 結論と調査範囲
+## 結論
 
-2026-11-04にローカルの`src/`、`README.md`、`scripts/`、`tests/fixtures/`を確認した範囲では、既存の請求書と会計取引を紐付ける書き込みAPIは見つからない。請求書の取引登録を起動するAPIも見つからない。ネットワークは使っておらず、公開API全体に存在しないという結論ではない。
+確認したfreeeの公開APIには、請求書と取引を紐付ける手段がない。このため、`deals create`は`--invoice-id`を拒否する。請求書から取引を登録する場合は、freeeのWeb画面を使う。
 
-OpenAPI全文（生成スクリプトが参照する`.iv-schema.yml`を含む）はこのcheckoutに見つからない。同梱されているのはOpenAPIから抽出したプロパティ一覧・リクエスト制約のfixtureであり、全エンドポイントや各レスポンス項目の型・意味の定義は確認できない。公式スキーマ全文の最新確認と実機確認は未実施。
+## 公開APIの根拠
 
-## 確認できた項目と根拠
+公式OpenAPIスキーマと会計APIリファレンスの確認日：2026-11-04。
 
-|対象|項目・手段|ローカルの根拠|
-|---|---|---|
-|請求書取得レスポンス|`deal_status`、`deal_id`|[OpenAPI由来fixtureの`invoice`](../tests/fixtures/iv-invoice-show-keys.json)。取得日は2026-09-08、元スキーマのSHA-256は同ファイルの`_upstreamSha256`|
-|請求書のCLI型|`deal_status`は`registered`または`unregistered`。従来の`invoices get`の整形結果は`deal_id`を出力しない|[`InvoiceSummary`と`toInvoiceDetail`](../src/types/invoice.ts)|
-|請求書リクエスト|抽出済み`InvoiceRequest`の`requestConstraints`に`deal_id`、`deal_status`、既存取引の指定項目は見つからない|[fixtureの`requestConstraints`](../tests/fixtures/iv-invoice-show-keys.json)、[生成スクリプト](../scripts/gen-iv-invoice-show-keys.mjs)|
-|請求書更新|`deal_id`、`deal_status`はレスポンスから落とす項目で、更新本文へ転記しない|[`RESPONSE_DROP_KEYS`と`runInvoicesUpdate`](../src/commands/invoices/update.ts)|
-|会計取引作成|`DealPayload`は`company_id`、`type`、`issue_date`、`partner_id`、`details`、任意の`due_date`、`receipt_ids`、`ref_number`。`invoice_id`等の請求書指定項目は見つからない|[`DealPayload`と`buildDealPlan`](../src/domain/deal-plan.ts)、[`runDealsCreate`](../src/commands/deals/create.ts)|
-|README|請求書の取消と紐づく取引の削除に関する注意はあるが、既存取引を紐付けるコマンドは見つからない|[READMEの請求書取消](../README.md)|
+- [会計APIの公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/v2020_06_15/open-api-3/api-schema.json)：取引作成（`POST /api/1/deals`）の`dealCreateParams`には、`issue_date`・`type`・`company_id`・`due_date`・`partner_id`・`partner_code`・`ref_number`・`details`・`payments`・`receipt_ids`・`parent_id`が定義されている。請求書IDの項目はなく、取引更新（`PUT /api/1/deals/{id}`）の`dealUpdateParams`にもない。
+- [請求書APIの公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/iv/open-api-3/api-schema.yml)：請求書の作成・更新に使う`InvoiceRequest`には取引IDの項目がない。一方、請求書の応答には`deal_status`（`registered`・`unregistered`）と`deal_id`（integer・nullable）が定義され、`unregistered`のとき`deal_id`は`null`になる。これらは読み取り用の応答項目であり、紐付けを指定する入力項目ではない。
+- 上記スキーマと[会計APIリファレンス](https://developer.freee.co.jp/reference/accounting/reference)では、請求書と取引を結び付ける専用エンドポイントは見つからなかった。
 
-fixtureの取得元は[公式の請求書OpenAPI](https://github.com/freee/freee-api-schema/blob/master/iv/open-api-3/api-schema.yml)。このURLの内容は今回取得していない。レスポンスに項目が存在することと、その項目を書き込み可能なことは別である。
+取引一覧（`GET /api/1/deals`）のクエリには、`company_id`・`partner_id`・`account_item_id`・`partner_code`・`status`・`type`・`start_issue_date`・`end_issue_date`・`start_due_date`・`end_due_date`・`start_renew_date`・`end_renew_date`・`min_due_amount`・`offset`・`limit`・`accruals`があり、`ref_number`での絞り込みはない。応答の取引にはnullableの`ref_number`が含まれるため、管理番号の検索はCLI側で行う（[会計APIの公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/v2020_06_15/open-api-3/api-schema.json)）。
 
-## 実装した確認オプション
+## CLIの挙動
 
-`deals create --type income --invoice-id <id>`は、`invoices get`と同じ`GET /iv/invoices/{id}?company_id=...`で請求書を読む確認オプションである。請求書を紐付ける書き込みではなく、`POST /api/1/deals`の本文にも請求書指定項目は追加しない。
+- [`deals create`](../src/commands/deals/create.ts)：`--invoice-id`または`--expect-invoice-number`を指定すると、dry-run・`--execute`のどちらでも認証・API呼び出し・監査記録の前にエラーになる。請求書指定のない取引作成と既存の重複検知は維持する。
+- [`invoices get`・`invoices list`の応答変換](../src/types/invoice.ts)：API応答の`deal_id`が数値または`null`ならJSONにそのまま含める。未指定またはそれ以外の型なら省略する。数値の`deal_id`は`deals get`に渡して対応する取引を確認できる。表の列は変更しない。
+- [`deals list --ref-number`](../src/commands/deals/list.ts)：既存のAPI検索条件で全ページを取得した後、`ref_number`を完全一致で絞る。一致が1件の場合だけ成功し、CLIはJSON配列を返す。0件なら管理番号の確認、2件以上なら取引先・種別・発生日・決済状態などの条件追加を求めてエラーになる。空文字・空白だけの指定も拒否する。
 
-事前にID・事業所・未取消・`deal_status=unregistered`・`deal_id`が未指定またはnullであることを照合する。金額は`total_amount`と明細合計、取引先は`partner_id`、発生日は`billing_date`、期日は`payment_date`と`--due-date`を完全一致で照合する。これはCLIが採用する照合ルールであり、API側で紐付くことを意味しない。期日未指定はnullまたは欠落同士のみ許可する。異なる日付を使う必要がある請求書はこのオプションでは扱わない。
+利用方法は[README](../README.md)の「未決済取引の作成（dry-run既定）」と「請求書」も参照。
 
-既定はdry-runで、`invoiceCheck`を返す。照合失敗はdry-runでも例外とし、送信しない。executeでは従来の`--expect-total`に加え、`--expect-invoice-number`の完全一致を必須とする。`--allow-duplicate`を付けても請求書の照合は省略しない。
+## 未確認事項と制約
 
-登録後に同じGETで読み戻し、事前と同じ照合項目に加えて`deal_status=registered`と`deal_id=作成した取引ID`を要求する。一致すれば`invoiceReadback`を返す。未登録・別取引・取得失敗などでは、取引作成済みIDを含む警告の例外を返す。CLI入口の既存エラー処理により終了コード1になる。自動再試行・自動取消は行わない。
+- 実在データを使ったAPIの実機確認は未実施であり、実環境での応答や動作は未確認。
+- Web画面で請求書から登録した取引の管理番号が請求書番号になるかは、確認した仕様書に記載がなく未確認。管理番号による検索には、両者が一致することの確認が必要であり、検索結果だけでは請求書との紐付けを証明できない。
+- `invoices get`で従来`deal_id`が表示されなかった原因は、CLIの項目の許可リストによるものと推測している。実機での原因確認は未実施。
+- **二重計上に注意する。** CLIで取引を作った後にWeb画面で同じ請求書から取引登録すると、売掛金が二重に計上される可能性がある。Web画面で登録する前に、既存取引と請求書の登録状態を確認する。
 
-監査は既存の`deal_create`の`planned`または`attempting`→`succeeded`を使用する。作成後の請求書確認に失敗した場合は、続けて`failed`、`write_state=succeeded`、`created_id`、`reason=invoice_readback_failed`を記録する。`succeeded`は取引POSTの成功であり、請求書確認の成功を表さない。追加の失敗監査が書けなくても、警告と作成済み状態を維持する。監査に請求書の全文・番号は追加しない。
+## 関連テスト
 
-## 運用上の限界
+以下はモックと架空データによるテストであり、実機確認を代替しない。
 
-公開APIによる紐付け手段を確認できていないため、会計取引を作成しても請求書が未登録のまま残り、事後確認が失敗する可能性がある。失敗時に再実行したり、画面で請求書から取引登録したりすると、二重の売掛金が立つおそれがある。警告時は処理を止め、`invoices get`と`deals get`で確認する。既存の`invoices get`では取引登録状態を確認でき、取引IDとの一致は本オプションの`invoiceReadback`で確認する。
-
-同一取引先・発生日・金額の既存取引は、種別・決済状態を問わず全ページで照合し、`--allow-duplicate`なしのexecuteを止める。ただし同時実行や後日の画面操作を排他する仕組みはなく、二重計上を全面的に防ぐものではない。実機確認では、既存の請求書と取引を読むところから始め、書き込みは個別承認後に実施する。
+- [`deals-create.test.ts`](../tests/unit/deals-create.test.ts)：請求書指定・確認番号の拒否と、既存の作成・重複検知。
+- [`invoice-deal-cli.test.ts`](../tests/unit/invoice-deal-cli.test.ts)：CLI経由の拒否、管理番号検索、JSON配列の出力とエラー。
+- [`invoice-deal-id.test.ts`](../tests/unit/invoice-deal-id.test.ts)：請求書get・listのJSONで数値・nullを保持し、不正な型・未指定を省略する挙動。
+- [`deals-ref-number.test.ts`](../tests/unit/deals-ref-number.test.ts)：全ページ取得後の完全一致、既存条件との併用、一致しない場合・複数一致の場合のエラー、空文字・空白の拒否。
