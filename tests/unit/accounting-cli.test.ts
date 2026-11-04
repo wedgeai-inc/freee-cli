@@ -33,3 +33,33 @@ it("7コマンドをCLIから利用でき、runtime OAuthはreceiptsと旧export
     expect(parseRuntimePlan(JSON.stringify({ commands: [["receipts", "--company-id", "1", "--out", "sample"]] }))[0]).toEqual(["export", "receipts", "--company-id", "1", "--out", "sample"]);
   } finally { await rm(dir, { recursive: true }); }
 });
+
+it("deals get/listだけに符号付き金額を追加し、内部の読み取りとreceipts出力は保持する", async () => {
+  const { PublicFreeeClient } = await import("../../src/lib/clients/freee-public-client.js");
+  const { runDealsGet } = await import("../../src/commands/deals/get.js");
+  const { runDealsList } = await import("../../src/commands/deals/list.js");
+  const deal = { id: 6, company_id: 1, type: "income", details: [
+    { amount: 1100, vat: 100, entry_side: "credit" },
+    { amount: 220, vat: 20, entry_side: "debit" },
+    { amount: 55, vat: 5 },
+  ] };
+  const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async url => {
+    const path = new URL(String(url)).pathname;
+    return new Response(JSON.stringify(path.endsWith("/deals") ? { deals: [deal] }
+      : path.includes("/deals/") ? { deal } : { receipt: { id: 5 } }));
+  });
+  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  const enriched = { ...deal, details: [
+    { ...deal.details[0], signed_amount: 1100, signed_vat: 100 },
+    { ...deal.details[1], signed_amount: -220, signed_vat: -20 },
+    { ...deal.details[2], signed_amount: null, signed_vat: null },
+  ], signed_totals: { amount: null, vat: null } };
+  for (const args of [["deals", "get", "6"], ["deals", "list"], ["receipts", "get", "5"]]) {
+    await createProgram().parseAsync([...args, "--company-id", "1"], { from: "user" });
+  }
+  expect(log.mock.calls.map(([value]) => JSON.parse(value))).toEqual([enriched, [enriched], { id: 5 }]);
+  const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "test-token", fetchFn });
+  expect(await runDealsGet({ companyId: 1, id: 6 }, { client })).toEqual(deal);
+  expect(await runDealsList({ companyId: 1 }, { client })).toEqual({ items: [deal] });
+  expect(fetchFn.mock.calls.every(([, options]) => options?.method === "GET")).toBe(true);
+});

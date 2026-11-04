@@ -9,6 +9,7 @@ import { runAccountItemsList } from "./account-items/list.js";
 import { runTaxesList } from "./taxes/list.js";
 import { runDealsList } from "./deals/list.js";
 import { runDealsGet } from "./deals/get.js";
+import { withSignedDealAmounts } from "../lib/deal-signed-output.js";
 import { runDealsPaymentsCreate } from "./deals/payments/create.js";
 import { appendAccountingAudit } from "../lib/audit/accounting-audit.js";
 import { runDealsCreate } from "./deals/create.js";
@@ -87,9 +88,12 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
       output((await runReceiptsList(options, { client: await getReadOnlyClient() })).items);
     });
   company(deals.command("list")).option("--partner-id <id>").option("--type <type>").option("--start-issue-date <YYYY-MM-DD>").option("--end-issue-date <YYYY-MM-DD>").option("--status <status>")
-    .action(async opts => output((await runDealsList({ companyId: parseCompanyId(opts.companyId), partnerId: opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id"), type: opts.type, startIssueDate: opts.startIssueDate, endIssueDate: opts.endIssueDate, status: opts.status }, { client: await getClient() })).items));
+    .action(async opts => output((await runDealsList({ companyId: parseCompanyId(opts.companyId), partnerId: opts.partnerId === undefined ? undefined : parsePositiveIntegerOption(opts.partnerId, "--partner-id"), type: opts.type, startIssueDate: opts.startIssueDate, endIssueDate: opts.endIssueDate, status: opts.status }, { client: await getClient() })).items.map(withSignedDealAmounts)));
   for (const [root, run] of [[deals, runDealsGet], [receipts, runReceiptsGet]] as const) {
-    company(root.command("get <id>")).action(async (id, opts) => output(await run({ companyId: parseCompanyId(opts.companyId), id: parsePositiveIntegerOption(id, "id") }, { client: await getClient() })));
+    company(root.command("get <id>")).action(async (id, opts) => {
+      const result = await run({ companyId: parseCompanyId(opts.companyId), id: parsePositiveIntegerOption(id, "id") }, { client: await getClient() });
+      output(root === deals ? withSignedDealAmounts(result) : result);
+    });
   }
   writeOptions(deals.command("create")).requiredOption("--type <type>", "income or expense").requiredOption("--issue-date <YYYY-MM-DD>").option("--due-date <YYYY-MM-DD>")
     .requiredOption("--partner-id <id>").requiredOption("--detail <detail>", "account_item_id=...,tax_code=...,amount=...,description=... (repeatable)", collect, [])
