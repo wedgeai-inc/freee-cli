@@ -195,6 +195,20 @@ dry-runの出力例（架空の値）:
 
 名前の解決と重複検知にはdry-runでも読み取りAPIと認証が必要です。dry-runでも全ページを照合し、`duplicateCheck`に重複の有無・一致した取引ID・実行時に阻止されるか（重複あり、かつ`--allow-duplicate`なし）を返します。重複があってもdry-runは例外にせず報告し、APIへの書き込みは行いません。`--expect-total`を指定すると、`checks.expectTotal`に期待値・明細合計・一致結果を返し、不一致でも報告のみです。確認オプション未指定なら`checks`は追加しません。実行する場合は同じ引数に`--execute --expect-total 1500`を追加します。明細合計が一致しなければ送信しません。同じ取引先・発生日・合計の取引を全ページで照合し、既存取引があれば止まります。取引種別・決済状態を問わず照合します。意図した重複を確認した場合だけ`--allow-duplicate`を付けてください。同時実行との間には競合の余地があるため、この照合はAPI側の冪等性を保証しません。
 
+請求書に対応する収入取引を登録する場合は、`--invoice-id`で登録前後の状態を確認できます（[調査結果と制約](docs/invoice-deal-link.md)）。このオプション自体は請求書と取引を紐付けません。
+
+```bash
+# ID・番号・金額は架空。既定はdry-run
+freee deals create --company-id 1 --type income --issue-date 2026-01-15 \
+  --due-date 2026-02-15 --partner-id 2 \
+  --detail 'account_item_id=3,tax_code=4,amount=1500' --invoice-id 8
+# 個別承認後、同じ引数に --execute --expect-total 1500 --expect-invoice-number SAMPLE-8 を追加
+```
+
+請求書が未取消かつ`deal_status=unregistered`で、金額・取引先・請求日（取引の発生日）・期日が一致する場合だけ進みます。登録後は請求書を読み戻し、`deal_status=registered`と`deal_id`が作成した取引IDに一致することを確認します。未登録のまま、別取引、取得失敗などでは、作成済みIDを含む警告と終了コード1を返します。取引は既に作成されているため、自動で再実行しないでください。
+
+**二重計上の注意:**CLIで取引を作成した後、画面から請求書の「取引登録」を行うと、別の売掛金が立ち二重計上になるおそれがあります。警告が出た場合は画面で追加登録せず、`invoices get`と`deals get`で状態を確認してください。この確認は同時実行や後日の画面操作を排他しません。監査ログの`succeeded`は取引作成の成功で、後続の`failed`（`invoice_readback_failed`）は請求書確認の失敗を表します。
+
 #### 取引の支払行の作成（dry-run既定）
 
 ```bash
