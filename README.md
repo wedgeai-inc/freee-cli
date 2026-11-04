@@ -303,6 +303,7 @@ freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json
 
 ```bash
 freee invoices list --company-id 1234567 --start-billing-date 2026-09-01 --end-billing-date 2026-09-30 --format table
+freee invoices list --company-id 1234567 --start-payment-date 2026-10-01 --end-payment-date 2026-10-31 --cancel-status uncanceled --format table --with-status-details
 freee invoices get --company-id 1234567 --id 123 --format json
 freee invoices templates --company-id 1234567 --format table
 ```
@@ -310,7 +311,12 @@ freee invoices templates --company-id 1234567 --format table
 `freee invoices next-number --company-id <company-id> --prefix ABC`は、取消済みを含む既存の請求書から`ABC-001`形式の次の番号を計算します。`--partner-id <partner-id>`で取引先の一致を確認でき、同じ接頭辞が複数の取引先に使われている場合は停止します。`--width 4`で最小桁数を指定でき（1〜10、既定3）、既存番号の桁数は維持します。出力は既定JSON、`--format table`で表形式です。全ページを取得できない場合は番号を返しません。番号の予約や帳票への書き込みは行いません。freee販売から作られた帳票も含めて数えます（freee販売の帳票へのアクセス権限が無い場合はAPIがエラーを返し、番号は返しません）。
 
 - `list` は `--partner-ids 1,2,3`（最大3件）、`--sending-status sent|unsent`、`--payment-status settled|unsettled|canceled|unprocessed|failed` で絞り込めます。
-- freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。上限に達すると終了コード 1 で終わり、取得済みの分も出力しません（ちょうど 10,000 件でも失敗します）。件数が多い場合は `--start-billing-date` / `--end-billing-date` で期間を絞ってください。
+- `--start-payment-date YYYY-MM-DD` / `--end-payment-date YYYY-MM-DD`は、期日（`payment_date`）の下限・上限を当日を含めて指定します。片側のみの指定も可能です。実在しない日付と下限が上限を超える指定は認証前に拒否します。
+- 期日はAPIクエリ`start_payment_date`・`end_payment_date`で絞り込みます。取消状態が`uncanceled`・`canceled`の場合は`cancel_status`も送信し、`all`または未指定の場合は送信しません。取得件数の上限は、APIで絞り込んだ後の結果に適用します。対応するクエリは[freee公式OpenAPIの`GET /invoices`](https://github.com/freee/freee-api-schema/blob/master/iv/open-api-3/api-schema.yml)に定義されています。
+- `--cancel-status all|uncanceled|canceled`の既定は`all`で、従来どおり取消済みも含めます。`uncanceled`は未取消のみ、`canceled`は取消済みのみを残します。未知・空の取消状態は、要確認として請求書ID付きの警告を標準エラーへ出し、`all`では保持、状態指定時は除外します（期日条件は別途適用）。
+- 期日範囲を指定した場合、APIから返った期日が未設定・空・不正・指定範囲外の行は範囲に含めず、要確認として請求書ID付きの警告を標準エラーへ出します。期日範囲を指定しなければその行も保持します。警告はJSON配列や表の標準出力へ混ぜません。
+- 表の既定列とJSON配列の形式は維持します。`--format table --with-status-details`で末尾に`payment_date`・`cancel_status`・`deal_status`を追加できます。`payment_status`は既定の表にも含まれます。期日の空欄は空セルになります。
+- freee 請求書 API は 2026-09-21 以降 `limit + offset` が 10,000 を超える取得をエラーにするため、`list` はその手前で中断します。上限に達すると終了コード 1 で終わり、取得済みの分も出力しません（ちょうど 10,000 件でも失敗します）。件数が多い場合は`--start-billing-date` / `--end-billing-date`または`--start-payment-date` / `--end-payment-date`で期間を絞ってください。
 - `invoices list`は、freee販売から作成された請求書を含める `sales_management_origin` には対応していません。
 - PDF の取得・請求書の送付は freee 請求書 API にないため、Web で行ってください。
 
