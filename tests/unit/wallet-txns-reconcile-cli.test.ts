@@ -35,7 +35,13 @@ it.each([true, false])("CLIのdry-runはガード成立%sで終了コードと�
   expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
   const files = await readdir(logDir);
   expect(files).toEqual(["freee-wallet-txn-reconcile-2026-01-15.jsonl"]);
-  expect(JSON.parse(await readFile(join(logDir, files[0]!), "utf8"))).toMatchObject({ event: "wallet_txn_reconcile", target_id: 8, task_id: "sample", status: "planned", payload_redacted: { company_id: 1, deals: [{ deal_id: 6, amount: 123 }] } });
+  const text = await readFile(join(logDir, files[0]!), "utf8");
+  const entry = JSON.parse(text);
+  if (valid) expect(entry).not.toHaveProperty("guards");
+  else expect(entry.guards).toEqual(JSON.parse(log.mock.calls[0]![0]).guards);
+  expect(text).not.toContain("fictional-private-description");
+
+  expect(JSON.parse(await readFile(join(logDir, files[0]!), "utf8"))).toMatchObject({ event: "wallet_txn_reconcile", target_id: 8, task_id: "sample", status: valid ? "planned" : "guard_failed", payload_redacted: { company_id: 1, deals: [{ deal_id: 6, amount: 123 }] } });
 });
 it.each([
   ["--execute"], ["--amount", "0"], ["--deal-id", "1.5"], ["--expect-amount", "NaN"], ["--expect-date", "2026-02-30"],

@@ -67,7 +67,7 @@ export async function runWalletTxnsReconcile(opts: WalletTxnsReconcileOptions, d
   }
   let created: { wallet_txn_id: number; deal_ids: number[] } | undefined;
   if (!opts.execute) {
-    await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), status: "planned" });
+    await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), ...(failedGuards.length > 0 ? { status: "guard_failed", guards } as const : { status: "planned" } as const) });
   } else {
     let unexpectedAdjustment = false;
     try {

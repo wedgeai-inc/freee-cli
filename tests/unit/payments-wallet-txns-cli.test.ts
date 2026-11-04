@@ -91,6 +91,10 @@ it.each([true, false])("dry-runのガード成立%sに応じた終了コード�
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     await createProgram().parseAsync([...paymentArgs, "--log-dir", dir], { from: "user" });
     expect(JSON.parse(log.mock.calls[0]![0])).toMatchObject({ mode: "dry-run", guards: { amountMatchesDue: valid }, deal: { id: 6, partner_id: null, partner_name: null } });
+    const entry = JSON.parse(await readFile(join(dir, (await readdir(dir))[0]!), "utf8"));
+    expect(entry.status).toBe(valid ? "planned" : "guard_failed");
+    if (valid) expect(entry).not.toHaveProperty("guards");
+    else expect(entry.guards).toEqual(JSON.parse(log.mock.calls[0]![0]).guards);
     expect(process.exitCode).toBe(valid ? 0 : 1);
     expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
   } finally { await rm(dir, { recursive: true }); }
@@ -99,4 +103,19 @@ it.each([true, false])("dry-runのガード成立%sに応じた終了コード�
 it.each(["0", "101", "1.5", "1e2"])("limit=%sを同じ範囲エラーで認証前に拒否する", async limit => {
   await expect(createProgram().parseAsync([...walletArgs, "--limit", limit], { from: "user" })).rejects.toThrow("--limit must be an integer between 1 and 100");
   expect(loadApiAuth).not.toHaveBeenCalled();
+});
+
+it.each(["-1", "0.5", "NaN", "Infinity", "9007199254740992", "1e2", " ", "2147483648"])("offset=%sを同じ範囲エラーで認証前に拒否する", async offset => {
+  const fetchFn = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("unexpected fetch"));
+  await expect(createProgram().parseAsync([...walletArgs, "--offset", offset], { from: "user" })).rejects.toThrow("--offset must be an integer between 0 and 2147483647");
+  expect(loadApiAuth).not.toHaveBeenCalled();
+  expect(fetchFn).not.toHaveBeenCalled();
+});
+
+it("offsetの上限2147483647は受け付けてクエリへ渡す", async () => {
+  const fetchFn = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ wallet_txns: [] })));
+  vi.spyOn(console, "log").mockImplementation(() => {});
+  await createProgram().parseAsync([...walletArgs, "--offset", "2147483647"], { from: "user" });
+  expect(new URL(String(fetchFn.mock.calls[0]![0])).searchParams.get("offset")).toBe("2147483647");
+  expect(fetchFn).toHaveBeenCalledTimes(1);
 });

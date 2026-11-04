@@ -221,6 +221,8 @@ freee deals payments create 6 --company-id 1 --date 2026-01-15 \
 
 実行には同じ引数に`--execute --expect-amount 123`を追加します。`--expect-amount`がないと認証前に停止します。確認金額と支払金額の不一致、取引の事業所の不一致、支払残額が0以下、支払金額と支払残額の不一致、口座・勘定科目の不存在、日付ガードの不成立では送信しません。一部支払は扱いません。支払行が作成された後の再実行は、支払残額が0になるため停止します。同時実行を排他する仕組みではありません。
 
+このコマンドは未処理の口座明細を消込しません。口座明細がある入金に使うと、明細が残り二重計上になる可能性があります。口座明細がある入金には`wallet-txns reconcile`を使ってください。
+
 #### 口座明細と既存取引の消込（dry-run既定）
 
 ```bash
@@ -257,9 +259,9 @@ freee側で明細または取引が既に別の対象で消込・決済済みな
 
 これら4つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
 
-支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。既存の書き込みと同様、`mode`（`dry-run|execute`）、`status`（`planned|attempting|succeeded|failed`）、`payload_redacted`を記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
+支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。`mode`（`dry-run|execute`）、`status`（`planned|guard_failed|attempting|succeeded|failed`）、`payload_redacted`を記録します。dry-runは全ガードが成立すれば`planned`を1件記録し、1つ以上不成立なら`status=guard_failed`と、標準出力と同じ各ガードの真偽値を含む`guards`を1件記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
 
-消込のイベント名は`wallet_txn_reconcile`、ファイル名は`freee-wallet-txn-reconcile-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`payload_redacted`は送信本文の`company_id`と`deals`で、`created_id`は保存しません。dry-runは`planned`を1件記録します。executeのガード不成立は支払と同じく`failed / not_attempted / guard_failed:<ガード名,...>`を1件記録し、POSTしません。送信前に`attempting`を保存し、成功は`succeeded`、失敗は`failed`と`write_state`を保存します。HTTP 409は`rejected`、通信障害やサーバーエラーは`unknown`、成功応答の検証失敗（想定外の差額取引を含む）や送信後の監査失敗は`succeeded`です。送信結果を確認してから再実行してください。
+消込のイベント名は`wallet_txn_reconcile`、ファイル名は`freee-wallet-txn-reconcile-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`payload_redacted`は送信本文の`company_id`と`deals`で、`created_id`は保存しません。dry-runは支払と同じく、全ガード成立なら`planned`、1つ以上不成立なら`status=guard_failed`と`guards`の真偽値を1件記録します。executeのガード不成立は支払と同じく`failed / not_attempted / guard_failed:<ガード名,...>`を1件記録し、POSTしません。送信前に`attempting`を保存し、成功は`succeeded`、失敗は`failed`と`write_state`を保存します。HTTP 409は`rejected`、通信障害やサーバーエラーは`unknown`、成功応答の検証失敗（想定外の差額取引を含む）や送信後の監査失敗は`succeeded`です。送信結果を確認してから再実行してください。
 
 ### 取引先
 
