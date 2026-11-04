@@ -27,7 +27,7 @@ it("CLIの取引一覧は管理番号を渡し、JSON配列を維持する", asy
   registerAccountingCommands(program, getClient, getClient);
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   await program.parseAsync(["deals", "list", "--company-id", "1", "--ref-number", "SAMPLE-8"], { from: "user" });
-  expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual([{ id: 6, ref_number: "SAMPLE-8" }]);
+  expect(JSON.parse(String(log.mock.calls[0]?.[0]))).toEqual([{ id: 6, ref_number: "SAMPLE-8", signed_totals: { amount: null, vat: null } }]);
 });
 
 it("CLIは空の管理番号を認証前に拒否し、0件・複数件では結果を出力しない", async () => {

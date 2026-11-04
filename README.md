@@ -204,6 +204,19 @@ freeeの公開APIには請求書と取引を紐付ける手段がないため、
 freee deals list --company-id 1 --ref-number SAMPLE-8 --partner-id 2 --type income
 ```
 
+#### 取引の符号付き金額（推測・未確認）
+
+`deals get`と`deals list`のJSON出力では、API応答の既存項目を保持し、各明細行に`signed_amount`（符号付き税込金額）と`signed_vat`（符号付き消費税額）、各取引に`signed_totals: { amount, vat }`（それぞれの明細合計）を追加します。
+
+| 取引の`type` | `entry_side=credit` | `entry_side=debit` |
+| --- | --- | --- |
+| `income` | 正（通常行） | 負（控除行） |
+| `expense` | 負（控除行） | 正（通常行） |
+
+この符号規則は、作成時の負の金額が応答では正の金額と逆の`entry_side`で表されるという**推測**に基づきます。実在のAPI応答での確認は**未確認**です。
+
+`type`や`entry_side`が欠落・想定外の行は、両方の`signed_*`を`null`にします。`amount`または`vat`が数値でない場合（欠落・`null`・数値文字列を含む）は、対応する`signed_*`を`null`にします。不明な値を含む合計は、部分合計を返さず対応する`signed_totals`の値を`null`にします。明細配列が欠落・不正なら合計は両方`null`、空配列なら両方`0`です。この追加はCLIの読み取り出力だけに適用し、取引作成の重複検知など内部処理の応答は変更しません。
+
 #### 取引の支払行の作成（dry-run既定）
 
 ```bash
@@ -513,6 +526,27 @@ freee expense list --company-id 1234567 --start-transaction-date 2026-09-01 --en
 profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFILE>` として注入する（`<PROFILE>` は大文字、`-` は `_`）。profile 名は `^[a-z0-9][a-z0-9-]*$`（小文字・数字・ハイフン）に限る。大文字や `_` を許すと環境変数名が衝突し、別 profile の rotation が互いの item を上書きしうるため。
 
 **1Password の service account で実行する場合は `FREEE_OAUTH_VAULT_<PROFILE>` に vault 名も注入する。** service account では `op item get` / `op item edit` に vault の指定が必須で、無いと `a vault query must be provided when this command is called by a service account` で失敗する。個人アカウント（Touch ID）では省略してよい。対象 item は事前に `access_token`、`refresh_token`、`expires_at` の各 field を持たせる。token・secret・認可コードをファイル、ログ、標準出力、argv に置かない。**item 参照は `op` の argv に渡す**（値そのものではなく、どの item かを指す名前であり credential ではない）。ソース・テスト・fixture には埋め込まず、実行時に注入する。`op item edit` への token bundle は標準入力だけで渡す。refresh が無効な場合は自動でブラウザを開かず、`freee auth login --profile <name>` を明示的に実行して再認可する。
+
+### `op run --env-file`で認証する
+
+次のenvファイル例はすべて架空の参照・ID・vault名です。credentialの値は書かず、`FREEE_CLIENT_ID`と`FREEE_CLIENT_SECRET`は`op://`参照にします。`op run`が実行時に値へ解決して子プロセスに渡します。
+
+```dotenv
+# sample-freee.env（架空の例）
+FREEE_CLIENT_ID=op://fictional-vault/fictional-app/client_id
+FREEE_CLIENT_SECRET=op://fictional-vault/fictional-app/client_secret
+FREEE_OAUTH_ITEM_REFERENCE_SAMPLE_TEAM=abcdefghijklmnopqrstuvwxyz
+FREEE_OAUTH_VAULT_SAMPLE_TEAM=fictional-vault
+```
+
+`FREEE_OAUTH_ITEM_REFERENCE_<PROFILE>`にはitemのIDの生の値、`FREEE_OAUTH_VAULT_<PROFILE>`にはvaultの名前またはIDをそのまま書き、どちらにも`op://`を書かないでください。CLIはitem参照を`op item get`・`op item edit`のargvへ渡し、vaultを`--vault`へ渡します。tokenの値をargvへ渡すものではなく、既存のitem参照の扱いと同じです。
+
+```bash
+# profile sample-team → 環境変数の接尾辞 SAMPLE_TEAM
+op run --env-file=./sample-freee.env -- freee deals list --company-id 1 --profile sample-team
+```
+
+item参照やvaultの変数に`op://`を書くと、`op run`が起動時にその参照を解決しようとして失敗します。ただし、この失敗は本リポジトリでは実機で再現しておらず**未確認**です。profile名には既存の小文字・数字・ハイフンの規則を適用します。初回認可が必要な場合の`freee auth login`は、個別承認後に実行してください。
 
 従来の `~/.config/freee-mcp/tokens.json` は通常 CLI の token 管理元としては使用しない。`FREEE_ACCESS_TOKEN` は runtime OAuth が子プロセスへ token を渡す経路と、手元での一時的な利用のためのもので、永続保存先ではない。設定されていると `--profile` より優先される。
 
