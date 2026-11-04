@@ -503,15 +503,63 @@ profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFIL
 
 従来の `~/.config/freee-mcp/tokens.json` は通常 CLI の token 管理元としては使用しない。`FREEE_ACCESS_TOKEN` は runtime OAuth が子プロセスへ token を渡す経路と、手元での一時的な利用のためのもので、永続保存先ではない。設定されていると `--profile` より優先される。
 
-## credential を保存しない runtime OAuth（read-only export と invoices / quotations / partners write に共用）
+## credentialを保存しないruntime OAuth
 
 `FREEE_CLIENT_ID`と`FREEE_CLIENT_SECRET`をruntime注入し、ローカルの`/start`をブラウザで開く。callbackの認可コードをメモリ上でtokenへ交換し、Access Tokenを検証済みのCLI runtime plan にだけ渡す。token、code、secret、stateはファイルや標準出力へ保存しない。
 
-plan v2 は CLI ルートからの引数配列を `commands` に含むJSONで、最大500コマンド・1 コマンドあたり引数 64 個まで受け付ける（旧形式を正規化したあとの数で数える）。許可される先頭2要素は `export journals` / `export receipts` / `export wallet-txns` / `export expense-applications`、`companies list`、`partners search` / `create` / `get` / `update`、`invoices list` / `get` / `templates` / `create` / `update` / `cancel` / `uncancel`、`quotations list` / `get` / `templates` / `create` / `cancel` / `uncancel` のみである。旧形式の `journals` などの export subcommand は `export journals` に正規化して互換実行する。任意のshell・実行ファイル・`expense` / `auth` 等の未許可コマンドは拒否する。
+plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最大500コマンド・1コマンドあたり引数64個まで受け付ける（旧形式を正規化したあとの数で数える）。次の表にあるコマンドの接頭辞だけを許可する。`deals payments create`は先頭3要素、それ以外は先頭2要素を照合する。
+
+<!-- runtime-plan-allowlist:start -->
+| 許可するコマンドの接頭辞 |
+| --- |
+| `export journals` |
+| `export receipts` |
+| `export wallet-txns` |
+| `export expense-applications` |
+| `companies list` |
+| `account-items list` |
+| `taxes list` |
+| `deals list` |
+| `deals get` |
+| `deals create` |
+| `wallet-txns list` |
+| `wallet-txns reconcile` |
+| `walletables list` |
+| `deals payments create` |
+| `receipts get` |
+| `receipts upload` |
+| `partners search` |
+| `partners create` |
+| `partners get` |
+| `partners update` |
+| `invoices list` |
+| `invoices get` |
+| `invoices templates` |
+| `invoices create` |
+| `invoices cancel` |
+| `invoices uncancel` |
+| `invoices update` |
+| `quotations list` |
+| `quotations get` |
+| `quotations templates` |
+| `quotations create` |
+| `quotations cancel` |
+| `quotations uncancel` |
+<!-- runtime-plan-allowlist:end -->
+
+旧形式の`journals`などのexportサブコマンドは`export journals`に正規化して互換実行する。`wallet-txns --company-id …`も旧export形式として扱うが、`wallet-txns list|reconcile`は現行CLIのまま実行する。任意のshell・実行ファイル・`expense` / `auth`等の未許可コマンドや、`deals payments delete`等の未許可の兄弟コマンドは拒否する。
+
+追加した4コマンドの許可理由:
+
+- `wallet-txns list`と`walletables list`はGETのみで、APIへの書き込みがない。
+- `wallet-txns reconcile`と`deals payments create`はdry-runが既定で、`--execute`時には`--expect-amount`が必須。指定金額との完全一致に加え、事業所・残額・日付等を検証してから書き込む。消込の`--expect-date`は任意で、指定時は明細日付と完全一致を要求する。
+- 書き込み系2件はdry-runで`planned`、実行時に`attempting`と結果の`succeeded|failed`を監査ログへ残す。送信前監査が失敗すると送信しない。入力形式の不備や必須オプション不足は監査より前に拒否される。許可リストは認可操作や実行承認の代わりにはならない。
+
+`deals create`と`receipts upload`もdry-runが既定で、`--execute`時に書き込む。これらを含め、実行前に対象とplan内容を確認すること。
 
 `invoices create` / `update` / `cancel` / `uncancel`、`quotations create` / `cancel` / `uncancel`、`partners create`、`partners update` は dry-run が既定だが、plan に `--execute` を含めると runtime OAuth 経由でも実際に API write をする。`invoices update --execute` / `cancel --execute` / `uncancel --execute` には `--expect-invoice-number` が、`quotations cancel --execute` / `uncancel --execute` には `--expect-quotation-number` が、`partners update --execute` には `--expect-name` が必須である。実行前に対象と plan 内容を確認すること。
 
-- 事前の検証は、plan の形・コマンド数・許可された先頭 2 要素までで、各コマンドのオプションや参照先の plan JSON の中身は実行時に検証される。
+- 事前の検証は、planの形・コマンド数・上表の接頭辞までで、各コマンドのオプションや参照先のplan JSONの中身は実行時に検証される。
 - `commands` は**先頭から 1 つずつ実行し、失敗した時点で止まる**。先に成功した書き込みは取り消さず、途中から再開する機能もない。失敗したら各コマンドの結果を確かめ、実行済みの作成コマンドを含む plan を丸ごと再実行しない。
 - `commands` の中の相対パス（`--plan` / `--out` / `--log-dir`）は、runtime plan ファイルの場所ではなく**リポジトリのルートを基準**に解決される。リポジトリの外のファイルは絶対パスで書く。
 
