@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { secureAppend } from "./secure-append.js";
 import { join } from "node:path";
 import { isSensitivePiiKey } from "./redactor.js";
 
@@ -84,8 +84,7 @@ export async function appendInvoiceAudit(logDir: string, entry: InvoiceAuditEntr
   const leakage = detectLeakage(entry, "");
   if (leakage) throw new Error(`InvoiceAuditEntry: redact漏れを検知 — ${leakage}`);
   const day = entry.timestamp.slice(0, 10);
-  mkdirSync(logDir, { recursive: true });
-  appendFileSync(join(logDir, `freee-invoice-create-${day}.jsonl`), JSON.stringify(entry) + "\n", "utf8");
+  secureAppend(join(logDir, `freee-invoice-create-${day}.jsonl`), JSON.stringify(entry) + "\n");
 }
 
 /** invoices cancel の audit log（JSONL）。create と同じ redact 漏れ guard を共有する。 */
@@ -93,8 +92,7 @@ export async function appendInvoiceCancelAudit(logDir: string, entry: InvoiceCan
   const leakage = detectLeakage(entry, "");
   if (leakage) throw new Error(`InvoiceCancelAuditEntry: redact漏れを検知 — ${leakage}`);
   const day = entry.timestamp.slice(0, 10);
-  mkdirSync(logDir, { recursive: true });
-  appendFileSync(join(logDir, `freee-invoice-cancel-${day}.jsonl`), JSON.stringify(entry) + "\n", "utf8");
+  secureAppend(join(logDir, `freee-invoice-cancel-${day}.jsonl`), JSON.stringify(entry) + "\n");
 }
 
 /** invoices uncancel の audit log（JSONL）。 */
@@ -102,14 +100,12 @@ export async function appendInvoiceUncancelAudit(logDir: string, entry: InvoiceU
   const leakage = detectLeakage(entry, "");
   if (leakage) throw new Error(`InvoiceUncancelAuditEntry: redact漏れを検知 — ${leakage}`);
   const day = entry.timestamp.slice(0, 10);
-  mkdirSync(logDir, { recursive: true });
-  appendFileSync(join(logDir, `freee-invoice-uncancel-${day}.jsonl`), JSON.stringify(entry) + "\n", "utf8");
+  secureAppend(join(logDir, `freee-invoice-uncancel-${day}.jsonl`), JSON.stringify(entry) + "\n");
 }
 
 export async function appendInvoiceUpdateAudit(logDir: string, entry: InvoiceUpdateAuditEntry): Promise<void> {
   const leakage = detectLeakage(entry, "");
   if (leakage) throw new Error(`InvoiceUpdateAuditEntry: redact漏れを検知 — ${leakage}`);
   const day = entry.timestamp.slice(0, 10);
-  mkdirSync(logDir, { recursive: true });
-  appendFileSync(join(logDir, `freee-invoice-update-${day}.jsonl`), JSON.stringify(entry) + "\n", "utf8");
+  secureAppend(join(logDir, `freee-invoice-update-${day}.jsonl`), JSON.stringify(entry) + "\n");
 }
