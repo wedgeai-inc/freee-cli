@@ -85,6 +85,9 @@ export async function runInvoicesList(
     company_id: opts.companyId,
     ...(opts.startBillingDate ? { start_billing_date: opts.startBillingDate } : {}),
     ...(opts.endBillingDate ? { end_billing_date: opts.endBillingDate } : {}),
+    ...(opts.startPaymentDate ? { start_payment_date: opts.startPaymentDate } : {}),
+    ...(opts.endPaymentDate ? { end_payment_date: opts.endPaymentDate } : {}),
+    ...(opts.cancelStatus && opts.cancelStatus !== "all" ? { cancel_status: opts.cancelStatus } : {}),
     ...(opts.partnerIds ? { partner_ids: opts.partnerIds } : {}),
     ...(opts.sendingStatus ? { sending_status: opts.sendingStatus } : {}),
     ...(opts.paymentStatus ? { payment_status: opts.paymentStatus } : {}),
@@ -96,8 +99,8 @@ export async function runInvoicesList(
   while (true) {
     if (offset + limit > maxOffset) {
       throw new Error(
-        `invoices list: limit + offset が ${maxOffset} を超えるため中断しました（取得済み ${offset} 件）。期日の絞り込みは取得後に行うため取得件数を減らしません。` +
-          " --start-billing-date / --end-billing-date で期間を月単位などに絞ってください",
+        `invoices list: limit + offset が ${maxOffset} を超えるため中断しました（取得済み ${offset} 件）。APIの絞り込み後の取得件数が上限に達しています。` +
+          " --start-billing-date / --end-billing-date または --start-payment-date / --end-payment-date で期間を月単位などに絞ってください",
       );
     }
     const response = await deps.client.get("/invoices", { query: { ...query, limit, offset } });
@@ -106,7 +109,8 @@ export async function runInvoicesList(
     for (const raw of page) {
       const item = toInvoiceSummary(raw);
       // 絞り込みで除外される行についても、未知の取消状態を黙って落とさない。
-      if (item.cancel_status !== "uncanceled" && item.cancel_status !== "canceled") {
+      const unknownCancelStatus = item.cancel_status !== "uncanceled" && item.cancel_status !== "canceled";
+      if (unknownCancelStatus) {
         warnings.push(`invoices list: id=${item.id}: cancel_statusが未知です。要確認（allでは保持、状態指定時は除外）。`);
       }
       const invalidPaymentDate = filterPaymentDate && !isCalendarDate(item.payment_date);
@@ -117,8 +121,14 @@ export async function runInvoicesList(
       if (filterPaymentDate) {
         if (invalidPaymentDate) continue;
         const paymentDate = item.payment_date as string;
-        if (opts.startPaymentDate && paymentDate < opts.startPaymentDate) continue;
-        if (opts.endPaymentDate && paymentDate > opts.endPaymentDate) continue;
+        if ((opts.startPaymentDate && paymentDate < opts.startPaymentDate) ||
+            (opts.endPaymentDate && paymentDate > opts.endPaymentDate)) {
+          // 未知の取消状態で警告済みの行は、警告を重ねず除外する。
+          if (!unknownCancelStatus) {
+            warnings.push(`invoices list: id=${item.id}: payment_dateがAPIへ指定した期日範囲外です。要確認（期日範囲から除外）。`);
+          }
+          continue;
+        }
       }
       items.push(item);
     }

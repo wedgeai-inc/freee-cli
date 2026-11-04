@@ -25,8 +25,26 @@ describe("invoice payment date filtering", () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
     const query = new URL(String(fetchFn.mock.calls[1]?.[0])).searchParams;
     expect(query.get("offset")).toBe("100");
-    expect(query.has("start_payment_date")).toBe(false);
-    expect(query.has("end_payment_date")).toBe(false);
+    expect(query.get("start_payment_date")).toBe("2026-10-15");
+    expect(query.get("end_payment_date")).toBe("2026-10-31");
+  });
+
+  it("retrieves a small date-filtered result even when the unfiltered total exceeds 10,000", async () => {
+    const invoices = Array.from({ length: 10_001 }, (_, i) => row(i + 1, i === 10_000 ? "2026-10-15" : "2026-09-01"));
+    const fetchFn = vi.fn(async (input: string | URL | Request) => {
+      const query = new URL(String(input)).searchParams;
+      const start = query.get("start_payment_date");
+      const end = query.get("end_payment_date");
+      const filtered = invoices.filter(invoice =>
+        (!start || String(invoice.payment_date) >= start) && (!end || String(invoice.payment_date) <= end));
+      const offset = Number(query.get("offset"));
+      const limit = Number(query.get("limit"));
+      return new Response(JSON.stringify({ invoices: filtered.slice(offset, offset + limit) }));
+    });
+    const client = createInvoiceClient({ token: "synthetic", fetchFn });
+    const result = await runInvoicesList({ companyId: 1, startPaymentDate: "2026-10-15", endPaymentDate: "2026-10-15" }, { client });
+    expect(result.items.map(invoice => invoice.id)).toEqual([10_001]);
+    expect(fetchFn).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -34,8 +52,19 @@ describe("invoice payment date filtering", () => {
     [{ endPaymentDate: "2026-10-15" }, [1, 2]],
     [{ startPaymentDate: "2026-10-15", endPaymentDate: "2026-10-15" }, [2]],
   ])("supports one-sided and same-day bounds: %j", async (opts, ids) => {
-    const { client } = setup([[row(1, "2026-10-14"), row(2), row(3, "2026-10-16")]]);
+    const { client, fetchFn } = setup([[row(1, "2026-10-14"), row(2), row(3, "2026-10-16")]]);
     expect((await runInvoicesList({ companyId: 1, ...opts }, { client })).items.map(x => x.id)).toEqual(ids);
+    const query = new URL(String(fetchFn.mock.calls[0]?.[0])).searchParams;
+    expect(query.get("start_payment_date")).toBe("startPaymentDate" in opts ? opts.startPaymentDate : null);
+    expect(query.get("end_payment_date")).toBe("endPaymentDate" in opts ? opts.endPaymentDate : null);
+  });
+
+  it("warns when the API returns payment dates outside the requested range", async () => {
+    const { client } = setup([[row(1, "2026-10-14"), row(2), row(3, "2026-10-16")]]);
+    const result = await runInvoicesList({ companyId: 1, startPaymentDate: "2026-10-15", endPaymentDate: "2026-10-15" }, { client });
+    expect(result.items.map(invoice => invoice.id)).toEqual([2]);
+    expect(result.warnings).toHaveLength(2);
+    for (const id of [1, 3]) expect(result.warnings?.join("\n")).toContain(`id=${id}: payment_date`);
   });
 
   it("warns for every missing or invalid payment date instead of silently omitting them", async () => {
@@ -52,6 +81,15 @@ describe("invoice payment date filtering", () => {
     expect((await runInvoicesList({ companyId: 1 }, { client })).items.map(x => x.id)).toEqual([1, 2]);
   });
 
+  it.each([undefined, "all", "uncanceled", "canceled"] as const)("sends only a specific cancellation status to the API: %s", async cancelStatus => {
+    const { client, fetchFn } = setup([[]]);
+    await runInvoicesList({ companyId: 1, cancelStatus }, { client });
+    const query = new URL(String(fetchFn.mock.calls[0]?.[0])).searchParams;
+    expect(query.get("cancel_status")).toBe(cancelStatus === "uncanceled" || cancelStatus === "canceled" ? cancelStatus : null);
+    expect(query.has("start_payment_date")).toBe(false);
+    expect(query.has("end_payment_date")).toBe(false);
+  });
+
   it.each(["all", "uncanceled", "canceled"] as const)("handles cancellation explicitly and warns on unknown states with %s", async cancelStatus => {
     const { client } = setup([[row(1), row(2, "2026-10-15", "canceled"), row(3, "2026-09-01", "future"), row(4, "2026-10-15", null)]]);
     const result = await runInvoicesList({ companyId: 1, cancelStatus, startPaymentDate: "2026-10-01" }, { client });
@@ -62,6 +100,8 @@ describe("invoice payment date filtering", () => {
   });
 
   it.each([
+    { startPaymentDate: "2026-1-01" }, { endPaymentDate: "2026-10-1" },
+    { startPaymentDate: "2026-10-15T00:00:00Z" }, { endPaymentDate: " 2026-10-15" },
     { startPaymentDate: "2026/10/01" }, { endPaymentDate: "2026-02-29" },
     { startPaymentDate: "2026-13-01" }, { startPaymentDate: "2026-10-31", endPaymentDate: "2026-10-01" },
     { cancelStatus: "unknown" },
@@ -101,12 +141,13 @@ describe("invoice payment date filtering", () => {
     expect(JSON.parse(formatInvoicesList(result, "json", true))).toEqual(result.items);
   });
 
-  it("documents local filtering, cancellation defaults and extra table columns in CLI help", () => {
+  it("documents API filtering, cancellation defaults and extra table columns in CLI help", () => {
     const command = createProgram().commands.find(x => x.name() === "invoices")!.commands.find(x => x.name() === "list")!;
     const help = command.helpInformation();
     expect(help).toContain("--start-payment-date");
     expect(help).toContain("--end-payment-date");
     expect(help).toContain("client-side");
+    expect(help).toContain("API query");
     expect(help).toContain("--cancel-status");
     expect(help).toContain("all (default)");
     expect(help).toContain("--with-status-details");
@@ -116,12 +157,16 @@ describe("invoice payment date filtering", () => {
 
 describe("invoice payment date CLI wiring", () => {
   it("passes filters and detailed columns through the CLI and emits warnings only to stderr", async () => {
-    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ invoices: [row(1), row(2, null), row(3, "2026-10-15", "canceled"), row(4, "2026-10-15", "future")] })));
+    const fetchFn = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify({ invoices: [row(1), row(2, null), row(3, "2026-10-15", "canceled"), row(4, "2026-10-15", "future")] })));
     vi.stubGlobal("fetch", fetchFn);
     const out = vi.spyOn(console, "log").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await createProgram().exitOverride().parseAsync(["invoices", "list", "--company-id", "1", "--start-payment-date", "2026-10-15", "--end-payment-date", "2026-10-15", "--cancel-status", "uncanceled", "--with-status-details", "--format", "table"], { from: "user" });
+      const query = new URL(String(fetchFn.mock.calls[0]?.[0])).searchParams;
+      expect(query.get("start_payment_date")).toBe("2026-10-15");
+      expect(query.get("end_payment_date")).toBe("2026-10-15");
+      expect(query.get("cancel_status")).toBe("uncanceled");
       expect(out).toHaveBeenCalledOnce();
       const text = String(out.mock.calls[0]?.[0]);
       expect(text).toContain("payment_date\tcancel_status\tdeal_status");
