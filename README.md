@@ -78,6 +78,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `deals list` / `get <id>` | 読み取り |
 | `receipts list` / `get <id>` | 読み取り |
 | `deals create` | 書き込み（dry-run既定） |
+| `deals attach-receipt <id>` | 書き込み（dry-run既定） |
 | `deals payments create <deal-id>` | 書き込み（dry-run既定） |
 | `receipts upload` | 書き込み（dry-run既定） |
 | `expense list` | 読み取り |
@@ -204,6 +205,16 @@ freeeの公開APIには請求書と取引を紐付ける手段がないため、
 freee deals list --company-id 1 --ref-number SAMPLE-8 --partner-id 2 --type income
 ```
 
+#### 既存取引への証憑追加（dry-run既定）
+
+```bash
+freee deals attach-receipt 6 --company-id 1 --receipt-id 5
+```
+
+取得した既存明細の書き込み項目と証憑IDを保持し、証憑IDを重複なく追加します。`--receipt-id`は繰り返し指定できます。実行には`--execute --expect-total 1500`のように既存取引の税込合計の一致が必要です。取得から更新までに他の更新を行わないでください。
+
+取得した明細の`vat`（消費税額）が0・null・未定義・整数でない明細を含む取引では、税額不要の区分か0円の課税明細かを公開APIから判別できないため、dry-run・`--execute`のどちらでも監査の記録やPUTの前にエラーで止まります。その場合はfreeeのWeb画面で証憑を付けてください。新しい取引なら`deals create --receipt-id`で作成時に証憑を付けられます。
+
 #### 取引の符号付き金額（推測・未確認）
 
 `deals get`と`deals list`のJSON出力では、API応答の既存項目を保持し、各明細行に`signed_amount`（符号付き税込金額）と`signed_vat`（符号付き消費税額）、各取引に`signed_totals: { amount, vat }`（それぞれの明細合計）を追加します。
@@ -270,7 +281,9 @@ freee側で明細または取引が既に別の対象で消込・決済済みな
 
 #### 取引・証憑・支払・消込の監査ログ
 
-これら4つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+これら5つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+
+証憑追加のイベント名は`deal_attach_receipt`、ファイル名は`freee-deal-attach-receipt-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。dry-runは`planned`、executeは送信前に`attempting`、成功は`succeeded`、失敗は`failed`と`write_state`を記録します。
 
 支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。`mode`（`dry-run|execute`）、`status`（`planned|guard_failed|attempting|succeeded|failed`）、`payload_redacted`を記録します。dry-runは全ガードが成立すれば`planned`を1件記録し、1つ以上不成立なら`status=guard_failed`と、標準出力と同じ各ガードの真偽値を含む`guards`を1件記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
 
@@ -569,6 +582,7 @@ plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最�
 | `deals list` |
 | `deals get` |
 | `deals create` |
+| `deals attach-receipt` |
 | `wallet-txns list` |
 | `wallet-txns reconcile` |
 | `walletables list` |

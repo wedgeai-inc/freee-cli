@@ -13,6 +13,7 @@ import { withSignedDealAmounts } from "../lib/deal-signed-output.js";
 import { runDealsPaymentsCreate } from "./deals/payments/create.js";
 import { appendAccountingAudit } from "../lib/audit/accounting-audit.js";
 import { runDealsCreate } from "./deals/create.js";
+import { runDealsAttachReceipt } from "./deals/attach-receipt.js";
 import { runReceiptsGet } from "./receipts/get.js";
 import { runReceiptsList, validateReceiptsListOptions } from "./receipts/list.js";
 import { runReceiptsUpload } from "./receipts/upload.js";
@@ -102,6 +103,8 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
     .requiredOption("--partner-id <id>").requiredOption("--detail <detail>", "account_item_id=...,tax_code=...,amount=...,description=... (repeatable)", collect, [])
     .option("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--ref-number <text>").option("--expect-total <amount>").option("--allow-duplicate").option("--invoice-id <id>", "公開APIでは請求書と取引を紐付けできないため、指定するとエラー").option("--expect-invoice-number <number>", "取引作成では非対応。指定するとエラー")
     .action(async opts => output(await runDealsCreate({ companyId: parseCompanyId(opts.companyId), type: opts.type, issueDate: opts.issueDate, dueDate: opts.dueDate, partnerId: parsePositiveIntegerOption(opts.partnerId, "--partner-id"), details: opts.detail, receiptIds: opts.receiptId.map((id: string) => parsePositiveIntegerOption(id, "--receipt-id")), refNumber: opts.refNumber, execute: Boolean(opts.execute), expectTotal: expectedTotal(opts.expectTotal), allowDuplicate: Boolean(opts.allowDuplicate), invoiceId: opts.invoiceId === undefined ? undefined : parsePositiveIntegerOption(opts.invoiceId, "--invoice-id"), expectInvoiceNumber: opts.expectInvoiceNumber, logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendDealAudit(opts.logDir, entry), now: () => new Date() })));
+  writeOptions(deals.command("attach-receipt <id>")).requiredOption("--receipt-id <id>", "receipt ID (repeatable)", collect, []).option("--expect-total <amount>")
+    .action(async (id, opts) => output(await runDealsAttachReceipt({ companyId: parseCompanyId(opts.companyId), id: parsePositiveIntegerOption(id, "id"), receiptIds: opts.receiptId.map((value: string) => parsePositiveIntegerOption(value, "--receipt-id")), execute: Boolean(opts.execute), expectTotal: expectedTotal(opts.expectTotal), logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendDealAudit(opts.logDir, entry), now: () => new Date() })));
   writeOptions(deals.command("payments").command("create <deal-id>"))
     .requiredOption("--date <YYYY-MM-DD>").requiredOption("--from-walletable-type <type>")
     .requiredOption("--from-walletable-id <id>").requiredOption("--amount <n>").option("--expect-amount <n>")

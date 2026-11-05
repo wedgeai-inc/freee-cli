@@ -23,7 +23,7 @@ it("監査保存失敗は送信前に止め、送信後の失敗は結果不明�
 it("作成応答のID・事業所と更新対象IDを照合し、不正な応答では成功にしない", async () => {
   for (const payload of ["not-json", "{}", '{"deal":{"id":0}}', '{"deal":{"id":6,"company_id":2}}', '{"deal":{"id":7,"company_id":1}}']) {
     const appendAudit = vi.fn().mockResolvedValue(undefined);
-    await expect(auditedAccountingWrite({ ...base, target_id: 6 }, { now, appendAudit }, async () => new Response(payload), "deal")).rejects.toThrow("作成・更新済み");
+    await expect(auditedAccountingWrite({ ...base, event: "deal_attach_receipt", target_id: 6 }, { now, appendAudit }, async () => new Response(payload), "deal")).rejects.toThrow("作成・更新済み");
     expect(appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", write_state: "succeeded", reason: "invalid_response" }));
   }
 });

@@ -20,6 +20,7 @@ export const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string, ...
   ["deals", "list"],
   ["deals", "get"],
   ["deals", "create"],
+  ["deals", "attach-receipt"],
   // listはGETのみ。reconcileとpayments createはdry-run既定で、executeには
   // --expect-amountの完全一致と事業所・残額・日付等のガードを要求する。
   // 両writeはplanned / attempting / succeeded / failedを監査し、送信前監査失敗なら送信しない。
