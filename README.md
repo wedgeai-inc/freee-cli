@@ -69,6 +69,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `wallet-txns list` | 読み取り（口座明細） |
 | `wallet-txns reconcile <wallet-txn-id>` | 書き込み（全額消込・dry-run既定） |
 | `partners search` / `get` | 読み取り |
+| `partners resolve-legal` / `verify-invoice` | 国税庁の公表情報照会（JSON固定、freee認証不要） |
 | `partners create` / `update` | 書き込み（dry-run 既定） |
 | `invoices list` / `get` / `templates` | 読み取り |
 | `invoices create` / `update` / `cancel` / `uncancel` | 書き込み（dry-run 既定） |
@@ -290,6 +291,31 @@ freee側で明細または取引が既に別の対象で消込・決済済みな
 消込のイベント名は`wallet_txn_reconcile`、ファイル名は`freee-wallet-txn-reconcile-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`payload_redacted`は送信本文の`company_id`と`deals`で、`created_id`は保存しません。dry-runは支払と同じく、全ガード成立なら`planned`、1つ以上不成立なら`status=guard_failed`と`guards`の真偽値を1件記録します。executeのガード不成立は支払と同じく`failed / not_attempted / guard_failed:<ガード名,...>`を1件記録し、POSTしません。送信前に`attempting`を保存し、成功は`succeeded`、失敗は`failed`と`write_state`を保存します。HTTP 409は`rejected`、通信障害やサーバーエラーは`unknown`、成功応答の検証失敗（想定外の差額取引を含む）や送信後の監査失敗は`succeeded`です。送信結果を確認してから再実行してください。
 
 ### 取引先
+
+#### 法人番号・インボイス登録の照会
+
+国税庁の公式Web-APIを使います。利用前に[法人番号API利用規約](https://www.houjin-bangou.nta.go.jp/pc/webapi/riyokiyaku.html)と[インボイスAPI利用規約](https://www.invoice-kohyo.nta.go.jp/web-api/riyou_kiyaku.html)に同意し、[アプリケーションIDを申請](https://www.invoice-kohyo.nta.go.jp/web-api/index.html)してください。法人照会には`NTA_CORPORATE_APPLICATION_ID`、インボイス照会には`NTA_INVOICE_APPLICATION_ID`を実行時に注入します。インボイス用IDは法人番号APIにも使えますが、環境変数はそれぞれ明示してください。IDを引数やファイルに保存せず、1Passwordなどから実行時だけ注入してください。
+
+```bash
+# 以下の番号・名称は合成例。照会したい公開情報に置き換える
+freee partners resolve-legal --name "株式会社サンプル"
+freee partners resolve-legal --number 1234567890123
+freee partners verify-invoice --number T1234567890123
+freee partners verify-invoice --number T1234567890123 --expect-name "株式会社サンプル"
+freee partners verify-invoice --name "株式会社サンプル"
+```
+
+`--number`と`--name`はいずれか一つを指定します。標準出力にJSONだけを返し、ファイル保存やfreeeへの書き込みはしません。名称は部分一致検索です。インボイスAPIには名称検索がないため、`verify-invoice --name`は法人番号APIで候補を解決してからT番号を照会し、解決した正式名称も完全一致で照合します。この場合は両方の環境変数が必要です。個人事業者はT番号で照会してください。`--expect-name`を指定すると、その名称との完全一致を確認します。
+
+法人照会の`status`は`found`／`not_found`／`ambiguous`、`items`は正式名称`name`・法人番号`corporateNumber`・所在地`address`です。複数候補はすべて返し、分割された応答では先頭ページの候補と`complete: false`・総件数`total`を返します。候補を自動選択しません。インボイスの名称解決が0件・複数候補の場合も同じstatusで停止し、登録有無は断定しません。
+
+インボイス照会は`registered`／`not_registered`／`not_yet_registered`／`name_mismatch`を返します。`items`に`invoiceNumber`・登録名称`name`・公表所在地`address`（非公表ならnull）・`registered`・`nameMatches`（照合未指定ならnull）・登録／取消／失効日を含みます。登録状態は実行日のJST日付で判定します。名称不一致でも登録有無は`registered`で別に確認できます。
+
+通信失敗は`network_error`、HTTP失敗は`http_error`、不正な応答は`invalid_response`、入力不正は`invalid_input`、ID未設定は`configuration_error`です。照会結果はこれらも含めて終了コード0と明示的なstatusで返すため、自動処理では必ずstatusを確認してください。HTTP失敗や名称検索の0件を「未登録」と解釈しないでください。リダイレクト・自動再試行は行わず、1リクエスト15秒でタイムアウトします。
+
+このサービスは、国税庁法人番号システムWeb-API機能を利用して取得した情報をもとに作成しているが、サービスの内容は国税庁によって保証されたものではない。
+
+このサービスは、適格請求書発行事業者公表システムWeb-API機能を利用して取得した情報をもとに作成しているが、サービスの内容は国税庁によって保証されたものではない。
 
 #### 検索
 
