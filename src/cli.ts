@@ -38,6 +38,7 @@ import { appendQuotationAudit, appendQuotationCancelAudit, appendQuotationUncanc
 import { appendPartnerAudit, appendPartnerUpdateAudit } from "./lib/audit/partner-audit.js";
 import { runPartnersCreate, formatPartnerCreate } from "./commands/partners/create.js";
 import { runPartnersGet, formatPartnerGet } from "./commands/partners/get.js";
+import { runResolveLegal, runVerifyInvoice } from "./commands/partners/registry.js";
 import { runPartnersUpdate, formatPartnerUpdate } from "./commands/partners/update.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { formatCompaniesList, runCompaniesList } from "./commands/companies/list.js";
@@ -335,6 +336,24 @@ export function createProgram(): Command {
     });
 
   const partners = program.command("partners").description("partner read and write operations");
+  partners.command("resolve-legal")
+    .description("resolve a corporate name or number using the NTA public API (JSON; no freee auth)")
+    .option("--number <number>", "13-digit corporate number; mutually exclusive with --name")
+    .option("--name <name>", "corporate name candidate (partial match)")
+    .action(async (opts) => {
+      console.log(JSON.stringify(await runResolveLegal(opts, { applicationId: process.env.NTA_CORPORATE_APPLICATION_ID }), null, 2));
+    });
+  partners.command("verify-invoice")
+    .description("verify a T number or corporate name using the NTA public APIs (JSON; no freee auth)")
+    .option("--number <number>", "T followed by 13 digits; mutually exclusive with --name")
+    .option("--name <name>", "corporate name candidate; resolve uniquely before verification (corporations only)")
+    .option("--expect-name <name>", "exact registration name to check; defaults to resolved corporate name when using --name")
+    .action(async (opts) => {
+      console.log(JSON.stringify(await runVerifyInvoice(opts, {
+        applicationId: process.env.NTA_INVOICE_APPLICATION_ID,
+        corporateApplicationId: process.env.NTA_CORPORATE_APPLICATION_ID,
+      }), null, 2));
+    });
   partners
     .command("search")
     .description("search partners")
