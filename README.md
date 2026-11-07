@@ -173,7 +173,7 @@ freee receipts update 5 --company-id 1 --partner-name '架空発行元' \
   --issue-date 2026-01-15 --amount 1500
 ```
 
-`--partner-name`・`--issue-date`・`--amount`のうち1つ以上を指定します。文字数と金額の範囲はuploadと同じです。現在の証憑をGETして事業所の一致を確かめ、dry-runでは`current`と`payload`を表示します。`--execute`を付けると指定した項目だけを`receipt_metadatum`に入れてPUTし、指定しなかった項目は送信しません。実行後はGETで読み戻し、指定した項目だけの一致を`readback`に返します。読み戻し失敗や不一致は更新済みIDを含むエラーになり、非0で終了します。再実行せず`receipts get`で確認してください。`--log-dir`（既定`./audit-logs`）・`--task-id`も指定できます。更新前のメタデータと送信内容は監査ログに記録し、発行元は伏せ、金額は既存の監査と同様に記録します。upload・updateとも読み戻し失敗時は`write_state: succeeded`・`reason: readback_failed`を残します。
+`--partner-name`・`--issue-date`・`--amount`のうち1つ以上を指定します。文字数と金額の範囲はuploadと同じです。GETのクエリとPUTの本文に指定の`company_id`を送り、応答の証憑IDが指定のIDと一致することを確認します。応答の`company_id`は存在する場合だけ一致を確かめ、欠けていても失敗にはしません。dry-runでは`current`と`payload`を表示します。`--execute`を付けると指定した項目だけを`receipt_metadatum`に入れてPUTし、指定しなかった項目は送信しません。実行後はGETで読み戻し、指定した項目だけの一致を`readback`に返します。読み戻し失敗や不一致は更新済みIDを含むエラーになり、非0で終了します。再実行せず`receipts get`で確認してください。`--log-dir`（既定`./audit-logs`）・`--task-id`も指定できます。更新前の値は標準出力の`current`で確認できます。更新前のメタデータと送信内容は監査ログにも記録し、発行元は既存の規則で伏せ、金額は既存の監査と同様に記録します。upload・updateとも読み戻し失敗時は`write_state: succeeded`・`reason: readback_failed`を残します。
 
 #### 未決済取引の作成（dry-run既定）
 

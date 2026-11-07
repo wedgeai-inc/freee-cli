@@ -14,7 +14,7 @@ export async function runReceiptsUpdate(opts: ReceiptsUpdateOptions, deps: Recei
   if (!Object.keys(metadata).length) throw new Error("specify --partner-name, --issue-date or --amount");
   const client = await deps.getClient();
   const current = await runReceiptsGet(opts, { client });
-  if (current.company_id !== opts.companyId) throw new Error("invalid response company_id");
+  if (current.company_id !== undefined && current.company_id !== opts.companyId) throw new Error("invalid response company_id");
   const payload = { company_id: opts.companyId, receipt_metadatum: metadata };
   const mode = opts.execute ? "execute" as const : "dry-run" as const;
   const base = { task_id: opts.taskId, event: "receipt_update" as const, mode, company_id: opts.companyId, target_id: opts.id,

@@ -20,7 +20,7 @@ export async function readbackReceipt(
   let readback: Record<string, boolean> | undefined;
   try {
     const receipt = await runReceiptsGet({ id, companyId }, { client });
-    if (receipt.company_id !== companyId) throw new Error("invalid response company_id");
+    if (receipt.company_id !== undefined && receipt.company_id !== companyId) throw new Error("invalid response company_id");
     const metadata = isRecord(receipt.receipt_metadatum) ? receipt.receipt_metadatum : {};
     readback = {
       ...(opts.issueDate === undefined ? {} : { issueDateMatches: metadata.issue_date === opts.issueDate }),

@@ -18,7 +18,7 @@ it("9コマンドをCLIから利用でき、runtime OAuthはreceiptsと旧export
         : path.includes("partners/") ? { partner: { id: 2, company_id: 1, name: "架空取引先" } }
         : path.endsWith("deals") ? { deals: [] }
         : path.includes("deals/") ? { deal: { id: 6, company_id: 1, type: "expense", issue_date: "2026-01-15", partner_id: 2, amount: 1500, details: [{ id: 9, account_item_id: 3, tax_code: 4, amount: 1500, vat: 136 }], receipts: [] } }
-        : { receipt: { id: 5, company_id: 1 } };
+        : { receipt: { id: 5 } };
       return new Response(JSON.stringify(body));
     });
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
