@@ -3,6 +3,7 @@ import { expect, it } from "vitest";
 import { parseRuntimePlan, RUNTIME_PLAN_ALLOWLIST } from "../../src/lib/runtime-oauth.js";
 
 it.each([
+  ["receipts", "update", "5", "--company-id", "1", "--amount", "0"],
   ["wallet-txns", "list", "--company-id", "1"],
   ["wallet-txns", "reconcile", "8", "--company-id", "1", "--deal-id", "6", "--amount", "123"],
   ["wallet-txns", "create-deal", "8", "--company-id", "1", "--partner-id", "3", "--account-item-id", "4", "--tax-code", "0", "--amount", "123"],

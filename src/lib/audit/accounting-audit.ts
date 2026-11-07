@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { redact } from "./redactor.js";
 
 export interface AccountingAuditEntry {
-  timestamp: string; task_id: string; event: "deal_create" | "deal_attach_receipt" | "deal_payment_create" | "receipt_upload" | "wallet_txn_reconcile" | "wallet_txn_create_deal";
+  timestamp: string; task_id: string; event: "deal_create" | "deal_attach_receipt" | "deal_payment_create" | "receipt_upload" | "receipt_update" | "wallet_txn_reconcile" | "wallet_txn_create_deal";
   mode: "dry-run" | "execute"; status: "planned" | "guard_failed" | "attempting" | "succeeded" | "failed";
   company_id: number; payload_redacted: unknown; target_id?: number; created_id?: number;
   write_state?: "not_attempted" | "rejected" | "unknown" | "succeeded"; reason?: string;
@@ -11,7 +11,7 @@ export interface AccountingAuditEntry {
   filename?: string; sha256?: string;
 }
 export function redactAccountingPayload(value: unknown): unknown {
-  const masked = redact(value, ["description", "ref_number", "receipt_metadatum_issue_date"]);
+  const masked = redact(value, ["description", "ref_number", "receipt_metadatum_issue_date", "receipt_metadatum_partner_name"]);
   const scrub = (item: unknown): unknown => {
     if (typeof item === "string") return item.replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]");
     if (Array.isArray(item)) return item.map(scrub);

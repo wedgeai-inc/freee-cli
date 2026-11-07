@@ -17,6 +17,7 @@ import { runDealsCreate } from "./deals/create.js";
 import { runDealsAttachReceipt } from "./deals/attach-receipt.js";
 import { runReceiptsGet } from "./receipts/get.js";
 import { runReceiptsList, validateReceiptsListOptions } from "./receipts/list.js";
+import { runReceiptsUpdate } from "./receipts/update.js";
 import { runReceiptsUpload } from "./receipts/upload.js";
 import { appendDealAudit } from "../lib/audit/deal-audit.js";
 import { appendReceiptAudit } from "../lib/audit/receipt-audit.js";
@@ -29,9 +30,9 @@ function writeOptions(command: Command): Command {
     .option("--log-dir <path>", "audit log output directory", "./audit-logs")
     .option("--task-id <id>", "task ID", "freee-accounting-write");
 }
-function expectedTotal(raw: string | undefined): number | undefined {
+function expectedTotal(raw: string | undefined, flag = "--expect-total"): number | undefined {
   if (raw === undefined) return undefined;
-  if (!/^-?[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error("--expect-total must be a safe integer");
+  if (!/^-?[0-9]+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new Error(`${flag} must be a safe integer`);
   return Number(raw);
 }
 function parseOffset(raw: string): number {
@@ -140,6 +141,8 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
       output(result);
       if (result.mode === "dry-run" && Object.values(result.guards).some(ok => !ok)) process.exitCode = 1;
     });
-  writeOptions(receipts.command("upload")).requiredOption("--file <path>").requiredOption("--issue-date <YYYY-MM-DD>").option("--description <text>").option("--expect-sha256 <hash>")
-    .action(async opts => output(await runReceiptsUpload({ companyId: parseCompanyId(opts.companyId), file: opts.file, issueDate: opts.issueDate, description: opts.description, execute: Boolean(opts.execute), expectSha256: opts.expectSha256, logDir: opts.logDir, taskId: opts.taskId }, { getClient, readFile, appendAudit: entry => appendReceiptAudit(opts.logDir, entry), now: () => new Date() })));
+  writeOptions(receipts.command("update <id>")).option("--partner-name <text>").option("--issue-date <YYYY-MM-DD>").option("--amount <n>")
+    .action(async (id, opts) => output(await runReceiptsUpdate({ companyId: parseCompanyId(opts.companyId), id: parsePositiveIntegerOption(id, "id"), partnerName: opts.partnerName, issueDate: opts.issueDate, amount: expectedTotal(opts.amount, "--amount"), execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId }, { getClient, appendAudit: entry => appendReceiptAudit(opts.logDir, entry), now: () => new Date() })));
+  writeOptions(receipts.command("upload")).requiredOption("--file <path>").requiredOption("--issue-date <YYYY-MM-DD>").option("--description <text>").option("--partner-name <text>").option("--amount <n>").option("--expect-sha256 <hash>")
+    .action(async opts => output(await runReceiptsUpload({ companyId: parseCompanyId(opts.companyId), file: opts.file, issueDate: opts.issueDate, partnerName: opts.partnerName, amount: expectedTotal(opts.amount, "--amount"), description: opts.description, execute: Boolean(opts.execute), expectSha256: opts.expectSha256, logDir: opts.logDir, taskId: opts.taskId }, { getClient, readFile, appendAudit: entry => appendReceiptAudit(opts.logDir, entry), now: () => new Date() })));
 }

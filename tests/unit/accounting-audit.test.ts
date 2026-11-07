@@ -9,19 +9,22 @@ import { appendReceiptAudit } from "../../src/lib/audit/receipt-audit.js";
 it("JSONLの自由記述・名前・credentialをマスクし、証憑本文とパスを記録しない", async () => {
   const dir = await mkdtemp(join(tmpdir(), "freee-audit-test-"));
   try {
-    const base = { timestamp: "2026-01-15T00:00:00.000Z", task_id: "sample", mode: "dry-run" as const, status: "planned" as const, company_id: 1, payload_redacted: { description: "架空摘要", receipt_metadatum_issue_date: "2026-01-15", ref_number: "private-reference", name: "架空氏名", authorization: "Bearer fictional-secret", details: [{ description: "private-detail", amount: 1500 }] } };
+    const base = { timestamp: "2026-01-15T00:00:00.000Z", task_id: "sample", mode: "dry-run" as const, status: "planned" as const, company_id: 1, payload_redacted: { description: "架空摘要", receipt_metadatum_issue_date: "2026-01-15", ref_number: "private-reference", name: "架空氏名", receipt_metadatum_partner_name: "架空発行元", receipt_metadatum_amount: -123, current: { receipt_metadatum: { partner_name: "架空旧発行元", amount: 123 } }, authorization: "Bearer fictional-secret", details: [{ description: "private-detail", amount: 1500 }] } };
     await appendDealAudit(dir, { ...base, event: "deal_create" });
     await appendAccountingAudit(dir, { ...base, event: "deal_payment_create", target_id: 6 });
     await appendReceiptAudit(dir, { ...base, event: "receipt_upload", filename: "sample.pdf", sha256: "a".repeat(64) });
+    await appendReceiptAudit(dir, { ...base, event: "receipt_update", target_id: 5 });
     const files = await readdir(dir);
-    expect(files).toHaveLength(3);
+    expect(files).toHaveLength(4);
     expect(files).toContain("freee-deal-payment-create-2026-01-15.jsonl");
     for (const file of files) {
       const text = await readFile(join(dir, file), "utf8");
       expect(text.endsWith("\n")).toBe(true);
+      expect(JSON.parse(text).payload_redacted.current.receipt_metadatum.amount).toBe(123);
+      expect(JSON.parse(text).payload_redacted.receipt_metadatum_amount).toBe(-123);
       expect(JSON.parse(text).payload_redacted.description).toBe("[REDACTED]");
       expect(JSON.parse(text).payload_redacted.receipt_metadatum_issue_date).toBe("[REDACTED]");
-      for (const value of ["架空摘要", "private-reference", "架空氏名", "fictional-secret", "private-detail"]) expect(text).not.toContain(value);
+      for (const value of ["架空摘要", "private-reference", "架空氏名", "fictional-secret", "private-detail", "架空発行元", "架空旧発行元"]) expect(text).not.toContain(value);
     }
   } finally { await rm(dir, { recursive: true }); }
 });

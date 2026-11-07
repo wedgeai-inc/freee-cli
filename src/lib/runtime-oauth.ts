@@ -32,6 +32,7 @@ export const RUNTIME_PLAN_ALLOWLIST: ReadonlyArray<readonly [string, string, ...
   ["deals", "payments", "create"],
   ["receipts", "get"],
   ["receipts", "upload"],
+  ["receipts", "update"],
   ["partners", "search"],
   ["partners", "create"],
   ["partners", "get"],
@@ -186,7 +187,7 @@ export function parseRuntimePlan(text: string): RuntimePlan {
  * parseRuntimePlan と runExportPlan（旧 API 互換）の双方で使う。
  */
 export function normalizeLegacyExportCommand(command: string[]): string[] {
-  const receiptCommand = command[0] === "receipts" && ["get", "upload"].includes(command[1] ?? "");
+  const receiptCommand = command[0] === "receipts" && ["get", "upload", "update"].includes(command[1] ?? "");
   // 旧wallet-txns形式はオプションから始まる。位置引数は現行CLIの
   // サブコマンドとして扱い、未知の名前をexportの許可へ迂回させない。
   const walletCommand = command[0] === "wallet-txns" && command[1] !== undefined && !command[1].startsWith("-");
