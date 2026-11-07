@@ -13,6 +13,7 @@ export interface InvoiceCreateOptions {
   companyId: number;
   planPath: string;
   numberPrefix?: string;
+  expectedTotal?: number;
   execute: boolean;
   logDir: string;
   taskId: string;
@@ -55,7 +56,7 @@ export async function runInvoicesCreate(opts: InvoiceCreateOptions, deps: Invoic
 }
 
 export type InvoiceCreateFromPlanOptions = Omit<InvoiceCreateOptions, "planPath" | "numberPrefix"> & {
-  /** 指定すると、読み戻した合計金額（freee の確定値）がこの値と一致しなければ成功にしない。CLI は参考値の丸め差があり得るため渡さない */
+  /** 読み戻した合計金額（freeeの確定値）、dry-runでは参考合計との一致を要求する。 */
   expectedTotal?: number;
 };
 export type InvoiceCreateFromPlanDeps = Omit<InvoiceCreateDeps, "readFile">;
@@ -80,6 +81,7 @@ export async function createInvoiceFromPlan(raw: unknown, opts: InvoiceCreateFro
   };
 
   if (!opts.execute) {
+    if (opts.expectedTotal !== undefined && totals.total !== opts.expectedTotal) throw new Error("invoice create: total does not match --expect-total (POST not attempted)");
     await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), status: "planned" });
     return { mode, payload, totals };
   }

@@ -186,16 +186,25 @@ export function createProgram(): Command {
     .requiredOption("--company-id <id>", "freee company ID")
     .requiredOption("--plan <path>", "plan JSON path (POST /invoices body without company_id)")
     .option("--number-prefix <prefix>", "assign the next number from existing documents (reads API even in dry-run)")
+    .option("--json", "output the result as JSON")
+    .option("--expect-total <amount>", "require a matching safe integer total")
     .option("--execute", "execute real POST (default: dry-run)")
     .option("--log-dir <path>", "audit log output directory", "./audit-logs")
     .option("--task-id <id>", "task ID for audit log", "freee-invoice-create")
     .action(async (opts) => {
+      let expectedTotal: number | undefined;
+      if (opts.expectTotal !== undefined) {
+        expectedTotal = Number(opts.expectTotal);
+        if (!/^-?[0-9]+$/.test(opts.expectTotal) || !Number.isSafeInteger(expectedTotal)) throw new Error("--expect-total must be a safe integer");
+      }
+      if (opts.execute && opts.json && expectedTotal === undefined) throw new Error("--expect-total is required with --execute --json");
       const logDir: string = opts.logDir;
       const result = await runInvoicesCreate(
         {
           companyId: parseCompanyId(opts.companyId),
           planPath: opts.plan,
           numberPrefix: opts.numberPrefix,
+          expectedTotal,
           execute: Boolean(opts.execute),
           logDir,
           taskId: opts.taskId,
@@ -210,7 +219,7 @@ export function createProgram(): Command {
           now: () => new Date(),
         },
       );
-      console.log(formatInvoiceCreate(result));
+      console.log(opts.json ? JSON.stringify(result, null, 2) : formatInvoiceCreate(result));
     });
 
   invoices

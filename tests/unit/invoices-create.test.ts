@@ -3,6 +3,8 @@ import { createInvoiceClient } from "../../src/lib/clients/freee-invoice-client.
 import { AuditWriteError, InvoiceCreatedButUnverifiedError, ResponseParseError, classifyFailure, formatInvoiceCreate, runInvoicesCreate } from "../../src/commands/invoices/create.js";
 import { FreeeApiError } from "../../src/lib/clients/freee-public-client.js";
 import { createProgram } from "../../src/cli.js";
+import { loadApiAuth } from "../../src/lib/token-config-loader.js";
+vi.mock("../../src/lib/token-config-loader.js", () => ({ loadApiAuth: vi.fn(async () => ({ accessToken: "dummy" })) }));
 import { writeFileSync } from "node:fs";
 import { appendInvoiceAudit, type InvoiceAuditEntry } from "../../src/lib/audit/invoice-audit.js";
 import { mkdtempSync, readFileSync } from "node:fs";
@@ -51,6 +53,15 @@ describe("runInvoicesCreate", () => {
     expect(d.audits).toHaveLength(1);
     expect(d.audits[0]?.status).toBe("planned");
     expect(formatInvoiceCreate(result)).toContain("参考値");
+  });
+
+  it.each([616770, 616771])("dry-runは期待額%sを認証せず照合する", async expectedTotal => {
+    const d = deps(vi.fn());
+    const getClient = vi.fn(d.deps.getClient);
+    const promise = runInvoicesCreate({ ...opts, execute: false, expectedTotal }, { ...d.deps, getClient });
+    if (expectedTotal === 616770) expect((await promise).totals.total).toBe(expectedTotal);
+    else await expect(promise).rejects.toThrow(/total/);
+    expect(getClient).not.toHaveBeenCalled();
   });
 
   for (const over of [{ billing_date: "2026-09-06" }, { partner_id: 124 }]) {
@@ -364,6 +375,53 @@ describe("runInvoicesCreate", () => {
     }
     expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toContain("mode: dry-run");
     log.mockRestore();
+  });
+
+  it.each([
+    { json: true, execute: false, expected: undefined, ok: true },
+    { json: true, execute: false, expected: "616770", ok: true },
+    ...["0", "-1", "9007199254740991", "-9007199254740991"].map(expected => ({ json: true, execute: false, expected, ok: false })),
+    { json: true, execute: false, expected: "616771", ok: false },
+    { json: false, execute: false, expected: "616771", ok: false },
+    { json: true, execute: true, expected: "616770", ok: true },
+    { json: true, execute: true, expected: "616771", ok: false },
+    { json: false, execute: true, expected: undefined, ok: true },
+    ...[undefined, "NaN", "Infinity", "1.5", "9007199254740992", "", "1oops"].map(expected => ({ json: true, execute: true, expected, ok: false, invalid: true })),
+  ])("CLIのJSON出力と期待額照合 %j", async testCase => {
+    const dir = mkdtempSync(join(tmpdir(), "inv-cli-"));
+    const planPath = join(dir, "plan.json");
+    writeFileSync(planPath, JSON.stringify(plan));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 31 } }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 31, invoice_number: "INV-1", total_amount: 616770, partner_id: 123, billing_date: "2026-09-05" } })));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(loadApiAuth).mockClear();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const args = ["invoices", "create", "--company-id", "1", "--plan", planPath, "--log-dir", dir];
+      if (testCase.json) args.push("--json");
+      if (testCase.execute) args.push("--execute");
+      if (testCase.expected !== undefined) args.push("--expect-total", testCase.expected);
+      const promise = createProgram().exitOverride().configureOutput({ writeErr: () => {} }).parseAsync(args, { from: "user" });
+      if (testCase.ok) {
+        await promise;
+        if (testCase.json) {
+          const output = JSON.parse(log.mock.calls[0]![0]);
+          expect(output).toMatchObject({ mode: testCase.execute ? "execute" : "dry-run", totals: { total: 616770 }, payload: { company_id: 1 } });
+          expect(Object.keys(output).sort()).toEqual((testCase.execute ? ["mode", "totals", "payload", "created"] : ["mode", "totals", "payload"]).sort());
+          if (testCase.execute) expect(output.created).toMatchObject({ id: 31, total_amount: 616770 });
+        } else expect(log.mock.calls[0]![0]).toBe(formatInvoiceCreate(await runInvoicesCreate({ ...opts, companyId: 1, execute: true }, deps(vi.fn()
+          .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 31 } })))
+          .mockResolvedValueOnce(new Response(JSON.stringify({ invoice: { id: 31, invoice_number: "INV-1", total_amount: 616770, partner_id: 123, billing_date: "2026-09-05" } })))).deps)));
+      } else {
+        await expect(promise).rejects.toThrow("invalid" in testCase ? /expect-total/ : testCase.execute ? /再実行せず/ : /total does not match/);
+        expect(log).not.toHaveBeenCalled();
+      }
+      if (!testCase.execute || "invalid" in testCase) {
+        expect(loadApiAuth).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+      } else expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally { log.mockRestore(); vi.unstubAllGlobals(); }
   });
 
   it("classifies failures into fixed reasons without raw messages", () => {

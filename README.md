@@ -275,7 +275,16 @@ freee wallet-txns reconcile 8 --company-id 1 --deal-id 6 --amount 123 \
 | `dateNotFuture` | 明細日が有効で、Asia/Tokyoの今日以前（今日を含む） |
 | `dealStatusUnsettled` | 取引の`status=unsettled` |
 
-ガード不成立のdry-runもJSONを標準出力へ返し、終了コード1になります。全成立なら終了コード0です。明細の摘要（`description`）は出力しません。`deal.partner_id`がある場合は取引先APIから`partner_name`を取得し、取得失敗はエラーにします。取引先IDがなければ名前もnullです。execute成功時は`created: { wallet_txn_id, deal_ids }`を追加します。
+ガード不成立のdry-runもJSONを標準出力へ返し、終了コード1になります。全成立なら終了コード0です。明細の摘要（`description`）は出力しません。`deal.partner_id`がある場合は取引先APIから`partner_name`を取得し、取得失敗はエラーにします。取引先IDがなければ名前もnullです。execute成功時は`created: { wallet_txn_id, deal_ids }`を追加します。続いて明細と取引を読み戻し、次の真偽値を`readback`に追加します。
+
+| 項目 | 成立条件 |
+|---|---|
+| `walletTxnReconciled` | 明細ID・事業所IDが指定値と一致し、`status=2`かつ`due_amount=0` |
+| `dealCompanyMatches` | 取引ID・事業所IDが指定値と一致 |
+| `dealSettled` | 取引の`status=settled`かつ`due_amount=0` |
+| `dealTypeMatches` | 取引の`type`が送信前の明細の`entry_side`と一致 |
+
+読み戻しの失敗・不一致では終了コード1で停止し、消込済みの可能性と明細ID・取引IDを伝えます。監査へ追加の`status: failed`・`write_state: succeeded`・`reason: readback_failed`を記録し、不一致の場合は判定結果を`guards`に保存します。再実行せず、`deals get`とfreeeのWeb画面で確認してください。自動再送や取消は行いません。
 
 freee側で明細または取引が既に別の対象で消込・決済済みならHTTP 409です。消込後の再実行は明細・取引のstatusや残額が変わるためガードで止まります。同時実行を排他する仕組みではありません。応答の明細ID・`deal_ids`が要求した取引IDだけの配列（長さ1）であること・`new_deal_id=null`を検証し、不正なら送信済みとして停止します。`new_deal_id`が非nullなら想定外の差額取引が作られた旨を表示し、再実行前の確認を要求します。実機での動作は未検証です。
 
@@ -424,6 +433,16 @@ freee invoices create --company-id 1234567 --plan ./plan.json
 
 # execute: 実 POST → 読み戻し → audit log（./audit-logs/freee-invoice-create-<date>.jsonl）
 freee invoices create --company-id 1234567 --plan ./plan.json --execute
+```
+
+`--json`を付けると、成功時に`{ mode, totals, created?, assignedNumber?, payload }`をJSONとして標準出力へ返します。`created`はexecute成功時、`assignedNumber`は自動採番時だけ含まれます。`--json`なしの表示は従来どおりです。
+
+`--expect-total <金額>`には安全な整数（-9007199254740991〜9007199254740991）を指定します。dry-runでは参考合計`totals.total`と一致しなければ終了コード1になります。executeでは読み戻したfreeeの確定合計と照合し、不一致は作成済みの可能性を伝えるエラーにします。送信後の不一致で再実行せず、Web画面で確認してください。`--execute --json`には`--expect-total`が必須で、省略・不正値は認証前に停止します。`--json`なしのexecuteでは任意です。
+
+```bash
+# ID・金額は架空。実行前にdry-runで確認する
+freee invoices create --company-id 1234567 --plan ./plan.json --json --expect-total 1100
+freee invoices create --company-id 1234567 --plan ./plan.json --execute --json --expect-total 1100
 ```
 
 接頭辞から番号を自動採番するには、`--number-prefix ABC`を指定します。
