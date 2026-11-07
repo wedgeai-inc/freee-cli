@@ -68,6 +68,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `walletables list` | 読み取り |
 | `wallet-txns list` | 読み取り（口座明細） |
 | `wallet-txns reconcile <wallet-txn-id>` | 書き込み（全額消込・dry-run既定） |
+| `wallet-txns create-deal <wallet-txn-id>` | 書き込み（取引登録と全額消込・dry-run既定） |
 | `partners search` / `get` | 読み取り |
 | `partners resolve-legal` / `verify-invoice` | 国税庁の公表情報照会（JSON固定、freee認証不要） |
 | `partners create` / `update` | 書き込み（dry-run 既定） |
@@ -280,15 +281,45 @@ freee側で明細または取引が既に別の対象で消込・決済済みな
 
 出典：[freee公式APIリファレンス](https://developer.freee.co.jp/docs/accounting/reference)、[公式OpenAPIスキーマ](https://github.com/freee/freee-api-schema/blob/master/v2020_06_15/open-api-3/api-schema.json)（2026-11-02時点の抜粋に準拠）、[消込APIのお知らせ](https://developer.freee.co.jp/accounting/accounting-improvement/8614)。
 
+#### 口座明細から取引を登録して消込（dry-run既定）
+
+```bash
+freee wallet-txns create-deal 8 --company-id 1 \
+  --partner-id 3 --account-item-id 4 --tax-code 0 --amount 123 \
+  --expect-amount 123 --expect-date 2026-01-15
+```
+
+上のID・金額・日付は架空です。1明細から円の全額で1行の取引を登録し、同時に消し込みます。取引先・科目・税区分の判断は呼び出し側で行い、`--partner-id`・`--account-item-id`・`--tax-code`・`--amount`を必須とします。金額は正の安全な整数、税区分は0〜2147483647の整数です。`--issue-date YYYY-MM-DD`は省略時に明細の日付を使い、`--description`は任意です。
+
+既定はdry-runで、`payload`（送信予定）・`names`（取引先・科目・税区分の名前）・`wallet_txn`・`guards`・`duplicateCheck`を返します。全ガード成立なら終了コード0、不成立ならJSONを表示して終了コード1です。`--execute`には人の個別承認と`--expect-amount`が必要で、期待金額の省略は認証前に拒否します。
+
+| ガード | 成立条件 |
+|---|---|
+| `expectedAmountMatches` | 期待金額が未指定、または指定金額と一致 |
+| `expectedDateMatches` | 期待日付が未指定、または明細日付と一致 |
+| `walletTxnCompanyMatches` | 明細の事業所が指定と一致 |
+| `walletTxnUnreconciled` | statusが1、金額が正の安全な整数、残額が全額 |
+| `walletTxnAmountMatches` | 明細金額が指定金額と一致 |
+| `entrySideKnown` | 入金または出金 |
+| `issueDateNotAfterWalletDate` | 発生日が明細日付以前 |
+| `dateNotFuture` | 明細日付がJSTの今日以前 |
+| `noExistingDeal` | 同じ事業所・取引先・発生日・金額の取引が0件 |
+
+既存取引があれば`duplicateCheck.dealIds`にIDを返し、上書きせず拒否します。この場合は`wallet-txns reconcile`を使ってください。消込済みの明細も拒否します。同時実行を排他する仕組みではありません。
+
+送信は`POST /api/1/wallet_txns/{id}/create_deal`、本文は`{ company_id, issue_date, partner_id, deal_lines: [{ amount, account_item_id, tax_code, description? }] }`だけです。`vat`・`tax_entry_method`は送りません。`deal_ids`が正の安全な整数1件の配列であることを検証し、成功時は`created.deal_ids`を返します。続いて明細のstatusが2・残額が0であることと、作成取引の事業所・取引先・金額・発生日を読み戻し、真偽値を`readback`に返します。読み戻しの失敗や不一致では作成済みの可能性と取引IDを含む例外で停止します。再実行せず`deals get`で確認してください。自動取消や自動再送は行いません。実機での動作は未検証です。
+
 #### 取引・証憑・支払・消込の監査ログ
 
-これら5つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
+これら6つの書き込みは`--log-dir`（既定`./audit-logs`）にJSONLを残します。摘要・参照番号・既知の個人情報・Bearer値をマスクし、証憑はファイル名とSHA-256だけを記録します。送信前に監査ログを保存できなければ送信しません。送信後の失敗では作成・更新済みの可能性があるため、`deals list/get`・`receipts get`で確認してから再実行してください。成功時はAPI応答のIDを返します。登録内容は上の`get`コマンドで確認できます。
 
 証憑追加のイベント名は`deal_attach_receipt`、ファイル名は`freee-deal-attach-receipt-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。dry-runは`planned`、executeは送信前に`attempting`、成功は`succeeded`、失敗は`failed`と`write_state`を記録します。
 
 支払のイベント名は`deal_payment_create`、ファイル名は`freee-deal-payment-create-YYYY-MM-DD.jsonl`です。`target_id`に取引IDを記録し、成功時の`created_id`も取引IDです。`mode`（`dry-run|execute`）、`status`（`planned|guard_failed|attempting|succeeded|failed`）、`payload_redacted`を記録します。dry-runは全ガードが成立すれば`planned`を1件記録し、1つ以上不成立なら`status=guard_failed`と、標準出力と同じ各ガードの真偽値を含む`guards`を1件記録します。executeでガードが不成立なら、送信前に`status=failed`・`write_state=not_attempted`・`reason=guard_failed:<不成立のガード名をカンマ区切り>`を1件記録します。監査への追記も失敗した場合は、ガードエラーに監査失敗のメッセージを添えて停止します。送信時は`write_state`で未送信（`not_attempted`）・拒否（`rejected`）・結果不明（`unknown`）・成功（`succeeded`）を区別します。
 
 消込のイベント名は`wallet_txn_reconcile`、ファイル名は`freee-wallet-txn-reconcile-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`payload_redacted`は送信本文の`company_id`と`deals`で、`created_id`は保存しません。dry-runは支払と同じく、全ガード成立なら`planned`、1つ以上不成立なら`status=guard_failed`と`guards`の真偽値を1件記録します。executeのガード不成立は支払と同じく`failed / not_attempted / guard_failed:<ガード名,...>`を1件記録し、POSTしません。送信前に`attempting`を保存し、成功は`succeeded`、失敗は`failed`と`write_state`を保存します。HTTP 409は`rejected`、通信障害やサーバーエラーは`unknown`、成功応答の検証失敗（想定外の差額取引を含む）や送信後の監査失敗は`succeeded`です。送信結果を確認してから再実行してください。
+
+明細からの取引登録のイベント名は`wallet_txn_create_deal`、ファイル名は`freee-wallet-txn-create-deal-YYYY-MM-DD.jsonl`です。`target_id`は明細ID、`created_id`は作成取引IDです。摘要はマスクします。dry-runは全ガード成立なら`planned`、不成立なら`guard_failed`と`guards`を記録します。executeのガード不成立では`failed / not_attempted`を記録して送信しません。送信前監査が失敗すると送信せず、送信時は`attempting`→`succeeded`の順に保存します。HTTP・通信・応答検証・送信後監査の失敗は消込と同じ`write_state`で記録します。読み戻しの失敗では追加の`failed / succeeded / readback_failed`と作成IDを記録し、不一致の判定結果も`guards`に保存します。読み戻し失敗後は再実行しないでください。
 
 ### 取引先
 
@@ -611,6 +642,7 @@ plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最�
 | `deals attach-receipt` |
 | `wallet-txns list` |
 | `wallet-txns reconcile` |
+| `wallet-txns create-deal` |
 | `walletables list` |
 | `deals payments create` |
 | `receipts get` |
@@ -634,13 +666,13 @@ plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最�
 | `quotations uncancel` |
 <!-- runtime-plan-allowlist:end -->
 
-旧形式の`journals`などのexportサブコマンドは`export journals`に正規化して互換実行する。`wallet-txns --company-id …`も旧export形式として扱うが、`wallet-txns list|reconcile`は現行CLIのまま実行する。任意のshell・実行ファイル・`expense` / `auth`等の未許可コマンドや、`deals payments delete`等の未許可の兄弟コマンドは拒否する。
+旧形式の`journals`などのexportサブコマンドは`export journals`に正規化して互換実行する。`wallet-txns --company-id …`も旧export形式として扱うが、`wallet-txns list|reconcile|create-deal`は現行CLIのまま実行する。任意のshell・実行ファイル・`expense` / `auth`等の未許可コマンドや、`deals payments delete`等の未許可の兄弟コマンドは拒否する。
 
-追加した4コマンドの許可理由:
+追加した5コマンドの許可理由:
 
 - `wallet-txns list`と`walletables list`はGETのみで、APIへの書き込みがない。
-- `wallet-txns reconcile`と`deals payments create`はdry-runが既定で、`--execute`時には`--expect-amount`が必須。指定金額との完全一致に加え、事業所・残額・日付等を検証してから書き込む。消込の`--expect-date`は任意で、指定時は明細日付と完全一致を要求する。
-- 書き込み系2件はdry-runで`planned`、実行時に`attempting`と結果の`succeeded|failed`を監査ログへ残す。送信前監査が失敗すると送信しない。入力形式の不備や必須オプション不足は監査より前に拒否される。許可リストは認可操作や実行承認の代わりにはならない。
+- `wallet-txns reconcile`・`wallet-txns create-deal`・`deals payments create`はdry-runが既定で、`--execute`時には`--expect-amount`が必須。指定金額との完全一致に加え、事業所・残額・日付等を検証してから書き込む。`wallet-txns reconcile`・`wallet-txns create-deal`の`--expect-date`は任意で、指定時は明細日付と完全一致を要求する。
+- 書き込み系3件はdry-runで`planned`、実行時に`attempting`と結果の`succeeded|failed`を監査ログへ残す。送信前監査が失敗すると送信しない。入力形式の不備や必須オプション不足は監査より前に拒否される。許可リストは認可操作や実行承認の代わりにはならない。
 
 `deals create`と`receipts upload`もdry-runが既定で、`--execute`時に書き込む。これらを含め、実行前に対象とplan内容を確認すること。
 
