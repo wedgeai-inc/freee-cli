@@ -61,7 +61,7 @@ freee wallet-txns create-deal <wallet-txn-id> --company-id <id>
 3. dry-run：`planned`か`guard_failed`を監査ログへ記録し、結果を返します。ガードが不成立なら終了コード1です
 4. execute：ガード不成立なら`failed`・`not_attempted`を記録して例外にします
 5. execute：`auditedAccountingWrite`で送信前の監査を保存し、保存できなければ送信しません
-6. execute：読み戻します。明細が`status`2・`due_amount`0で、取引の事業所・取引先・金額・発生日が指定と一致することを確かめます
+6. execute：読み戻します。明細が`status`2・`due_amount`0で、取引の事業所・取引先・金額・発生日が指定と一致すること、取引の`type`が明細の`entry_side`と一致すること（`dealTypeMatches`）を確かめます
 
 **読み戻しの失敗や不一致は例外にし、作成済みの可能性と取引IDを出力します。自動で取消も再実行もしません。**
 

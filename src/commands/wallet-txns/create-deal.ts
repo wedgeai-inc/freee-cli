@@ -116,6 +116,7 @@ export async function runWalletTxnsCreateDeal(opts: WalletTxnsCreateDealOptions,
         dealPartnerMatches: isRecord(deal) && deal.partner_id === opts.partnerId,
         dealAmountMatches: isRecord(deal) && deal.amount === opts.amount,
         dealIssueDateMatches: isRecord(deal) && deal.issue_date === issueDate,
+        dealTypeMatches: isRecord(deal) && (wallet.entry_side === "income" || wallet.entry_side === "expense") && deal.type === wallet.entry_side,
       };
       if (Object.values(readback).some(ok => !ok)) throw new Error("readback mismatch");
     } catch {

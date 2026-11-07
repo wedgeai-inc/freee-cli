@@ -65,7 +65,7 @@ it("CLI executeは1回POSTし読み戻しと作成ID入り監査を返す", asyn
     if (init?.method === "POST") { posted = true; return new Response(JSON.stringify({ deal_ids: [6] })); }
     return new Response(JSON.stringify(path.includes("wallet_txns/") ? { wallet_txn: { id: 8, company_id: 1, date: "2026-01-15", amount: 123, due_amount: posted ? 0 : 123, status: posted ? 2 : 1, entry_side: "income" } }
       : path === "/api/1/deals" ? { deals: [] }
-      : path === "/api/1/deals/6" ? { deal: { id: 6, company_id: 1, partner_id: 3, amount: 123, issue_date: "2026-01-15" } }
+      : path === "/api/1/deals/6" ? { deal: { id: 6, company_id: 1, partner_id: 3, amount: 123, issue_date: "2026-01-15", type: "income" } }
       : path.includes("partners/") ? { partner: { id: 3, company_id: 1, name: "架空取引先" } }
       : path.includes("account_items") ? { account_items: [{ id: 4, name: "架空科目" }] } : { taxes: [{ code: 0, name: "架空税区分" }] }));
   });

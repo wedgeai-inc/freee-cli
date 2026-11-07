@@ -307,7 +307,7 @@ freee wallet-txns create-deal 8 --company-id 1 \
 
 既存取引があれば`duplicateCheck.dealIds`にIDを返し、上書きせず拒否します。この場合は`wallet-txns reconcile`を使ってください。消込済みの明細も拒否します。同時実行を排他する仕組みではありません。
 
-送信は`POST /api/1/wallet_txns/{id}/create_deal`、本文は`{ company_id, issue_date, partner_id, deal_lines: [{ amount, account_item_id, tax_code, description? }] }`だけです。`vat`・`tax_entry_method`は送りません。`deal_ids`が正の安全な整数1件の配列であることを検証し、成功時は`created.deal_ids`を返します。続いて明細のstatusが2・残額が0であることと、作成取引の事業所・取引先・金額・発生日を読み戻し、真偽値を`readback`に返します。読み戻しの失敗や不一致では作成済みの可能性と取引IDを含む例外で停止します。再実行せず`deals get`で確認してください。自動取消や自動再送は行いません。実機での動作は未検証です。
+送信は`POST /api/1/wallet_txns/{id}/create_deal`、本文は`{ company_id, issue_date, partner_id, deal_lines: [{ amount, account_item_id, tax_code, description? }] }`だけです。`vat`・`tax_entry_method`は送りません。`deal_ids`が正の安全な整数1件の配列であることを検証し、成功時は`created.deal_ids`を返します。続いて明細のstatusが2・残額が0であることと、作成取引の事業所・取引先・金額・発生日を読み戻し、取引の`type`が明細の`entry_side`と一致すること（`dealTypeMatches`）も確認して、真偽値を`readback`に返します。読み戻しの失敗や不一致では作成済みの可能性と取引IDを含む例外で停止します。再実行せず`deals get`で確認してください。自動取消や自動再送は行いません。実機での動作は未検証です。
 
 #### 取引・証憑・支払・消込の監査ログ
 

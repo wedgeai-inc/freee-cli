@@ -10,7 +10,7 @@ function setup(wallet: Record<string, unknown> = {}, existing: Record<string, un
     if (init?.method === "POST") { posted = true; return new Response(JSON.stringify({ deal_ids: [6] })); }
     const body = path.includes("wallet_txns/") ? { wallet_txn: { id: 8, company_id: 1, date: "2026-01-15", amount: 123, due_amount: posted ? 0 : 123, status: posted ? 2 : 1, entry_side: "expense", ...wallet } }
       : path === "/api/1/deals" ? { deals: existing }
-      : path === "/api/1/deals/6" ? { deal: { id: 6, company_id: 1, partner_id: 3, amount: 123, issue_date: "2026-01-15" } }
+      : path === "/api/1/deals/6" ? { deal: { id: 6, company_id: 1, partner_id: 3, amount: 123, issue_date: "2026-01-15", type: "expense" } }
       : path.includes("partners/") ? { partner: { id: 3, company_id: 1, name: "架空取引先" } }
       : path.includes("account_items") ? { account_items: [{ id: 4, name: "架空科目" }] }
       : { taxes: [{ code: 0, name: "架空税区分" }] };
@@ -78,14 +78,14 @@ it("executeは指定本文だけをPOSTし作成IDを監査して読み戻し、
   expect(writes()).toHaveLength(1);
   expect(new URL(writes()[0]![0]).pathname).toBe("/api/1/wallet_txns/8/create_deal");
   expect(JSON.parse(writes()[0]![1]!.body as string)).toEqual({ company_id: 1, issue_date: "2026-01-15", partner_id: 3, deal_lines: [{ amount: 123, account_item_id: 4, tax_code: 0, description: options.description }] });
-  expect(result).toMatchObject({ created: { deal_ids: [6] }, readback: { walletTxnReconciled: true, dealCompanyMatches: true, dealPartnerMatches: true, dealAmountMatches: true, dealIssueDateMatches: true } });
+  expect(result).toMatchObject({ created: { deal_ids: [6] }, readback: { walletTxnReconciled: true, dealCompanyMatches: true, dealPartnerMatches: true, dealAmountMatches: true, dealIssueDateMatches: true, dealTypeMatches: true } });
   expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["attempting", "succeeded"]);
   expect(deps.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ target_id: 8, created_id: 6 }));
   expect(fetchFn.mock.calls.slice(-2).map(c => new URL(c[0]).pathname)).toEqual(["/api/1/wallet_txns/8", "/api/1/deals/6"]);
   await expect(runWalletTxnsCreateDeal({ ...options, execute: true, expectAmount: 123 }, deps)).rejects.toThrow("walletTxnUnreconciled");
   expect(writes()).toHaveLength(1);
 });
-it.each(["wallet-status", "wallet-due", "wallet-id", "wallet-company", "deal-id", "deal-company", "deal-partner", "deal-amount", "deal-date", "network", "json"])("読み戻し失敗%sは取引IDと作成済みの可能性を出して止まり、再送しない", async failure => {
+it.each(["wallet-status", "wallet-due", "wallet-id", "wallet-company", "deal-id", "deal-company", "deal-partner", "deal-amount", "deal-date", "deal-type", "network", "json"])("読み戻し失敗%sは取引IDと作成済みの可能性を出して止まり、再送しない", async failure => {
   const { deps, fetchFn, writes } = setup();
   const original = fetchFn.getMockImplementation()!;
   let posted = false;
@@ -99,6 +99,7 @@ it.each(["wallet-status", "wallet-due", "wallet-id", "wallet-company", "deal-id"
     const patches: Record<string, Record<string, unknown>> = {
       "wallet-status": { status: 1 }, "wallet-due": { due_amount: 1 }, "wallet-id": { id: 9 }, "wallet-company": { company_id: 9 },
       "deal-id": { id: 9 }, "deal-company": { company_id: 9 }, "deal-partner": { partner_id: 9 }, "deal-amount": { amount: 124 }, "deal-date": { issue_date: "2026-01-14" },
+      "deal-type": { type: "income" },
     };
     const envelope = failure.startsWith("wallet") ? "wallet_txn" : "deal";
     if (body[envelope]) Object.assign(body[envelope], patches[failure]);
