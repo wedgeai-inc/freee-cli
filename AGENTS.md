@@ -32,4 +32,5 @@ AI コーディングエージェント向けの作業規約です。CC は `CLA
 - `deals payments create --execute`
 - `receipts upload --execute`
 - `wallet-txns reconcile --execute`
+- `wallet-txns create-deal --execute`
 - `freee auth login`（ブラウザでの認可）

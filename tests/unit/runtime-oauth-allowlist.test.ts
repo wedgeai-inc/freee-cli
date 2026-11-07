@@ -5,6 +5,7 @@ import { parseRuntimePlan, RUNTIME_PLAN_ALLOWLIST } from "../../src/lib/runtime-
 it.each([
   ["wallet-txns", "list", "--company-id", "1"],
   ["wallet-txns", "reconcile", "8", "--company-id", "1", "--deal-id", "6", "--amount", "123"],
+  ["wallet-txns", "create-deal", "8", "--company-id", "1", "--partner-id", "3", "--account-item-id", "4", "--tax-code", "0", "--amount", "123"],
   ["walletables", "list", "--company-id", "1"],
   ["deals", "payments", "create", "6", "--company-id", "1", "--date", "2026-01-15", "--from-walletable-type", "wallet", "--from-walletable-id", "2", "--amount", "123"],
 ].map(command => [command]))("消込用コマンド%jを旧export形式へ変換せず許可する", command => {
@@ -13,7 +14,7 @@ it.each([
 
 it("未許可の兄弟コマンドと3階層未満の支払コマンドを拒否する", () => {
   for (const command of [
-    ["wallet-txns", "delete"], ["wallet-txns", "reconcile-all"],
+    ["wallet-txns", "delete"], ["wallet-txns", "reconcile-all"], ["wallet-txns", "create-deal-all"],
     ["walletables", "create"], ["deals", "payments"],
     ["deals", "payments", "delete"], ["deals", "payments", "create-all"],
     ["deals", "payments", "--execute"],
