@@ -3,13 +3,15 @@ import { PublicFreeeClient } from "../../src/lib/clients/freee-public-client.js"
 import { runWalletTxnsReconcile } from "../../src/commands/wallet-txns/reconcile.js";
 
 const options = { walletTxnId: 8, companyId: 1, dealId: 6, amount: 123, logDir: "unused", taskId: "sample" };
-function setup(wallet: Record<string, unknown> = {}, deal: Record<string, unknown> = {}) {
+function setup(wallet: Record<string, unknown> = {}, deal: Record<string, unknown> = {}, readWallet: Record<string, unknown> = {}, readDeal: Record<string, unknown> = {}) {
+  let posted = false;
   const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
     const path = new URL(url).pathname;
+    if (init?.method === "POST") posted = true;
     const body = init?.method === "POST" ? { wallet_txn_id: 8, deal_ids: [6], new_deal_id: null }
-      : path.includes("wallet_txns/") ? { wallet_txn: { id: 8, company_id: 1, date: "2026-01-15", amount: 123, due_amount: 123, entry_side: "expense", status: 1, walletable_type: "bank_account", walletable_id: 2, description: "fictional-private-description", ...wallet } }
+      : path.includes("wallet_txns/") ? { wallet_txn: { id: 8, company_id: 1, date: "2026-01-15", amount: 123, due_amount: 123, entry_side: "expense", status: 1, walletable_type: "bank_account", walletable_id: 2, description: "fictional-private-description", ...wallet, ...(posted ? { status: 2, due_amount: 0, ...readWallet } : {}) } }
       : path.includes("partners/") ? { partner: { id: 3, company_id: 1, name: "架空取引先" } }
-      : { deal: { id: 6, company_id: 1, type: "expense", issue_date: "2026-01-15", amount: 123, due_amount: 123, status: "unsettled", partner_id: null, ...deal } };
+      : { deal: { id: 6, company_id: 1, type: "expense", issue_date: "2026-01-15", amount: 123, due_amount: 123, status: "unsettled", partner_id: null, ...deal, ...(posted ? { status: "settled", due_amount: 0, ...readDeal } : {}) } };
     return new Response(JSON.stringify(body));
   });
   const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "dummy", fetchFn: fetchFn as typeof fetch });
@@ -23,6 +25,7 @@ it("dry-runは2件を読み全ガードと送信予定を返し摘要を公開�
   expect(Object.values(result.guards)).toHaveLength(12);
   expect(Object.values(result.guards).every(Boolean)).toBe(true);
   expect(JSON.stringify(result)).not.toContain("description");
+  expect(result).not.toHaveProperty("readback");
   expect(writes()).toHaveLength(0);
   expect(fetchFn.mock.calls.map(c => new URL(c[0]).pathname)).toEqual(["/api/1/wallet_txns/8", "/api/1/deals/6"]);
   expect(fetchFn.mock.calls.every(c => new URL(c[0]).searchParams.get("company_id") === "1")).toBe(true);
@@ -37,11 +40,14 @@ it.each([
   await expect(runWalletTxnsReconcile({ ...options, ...override }, deps)).rejects.toThrow();
   expect(deps.getClient).not.toHaveBeenCalled();
 });
-it("executeは送信前監査を保存し公式本文だけをPOSTしてフラットな結果を返す", async () => {
-  const { deps, writes } = setup();
+it.each(["income", "expense"])("execute(%s)は送信前監査を保存し公式本文だけをPOSTして読み戻す", async type => {
+  const { deps, fetchFn, writes } = setup({ entry_side: type }, { type });
   deps.appendAudit.mockImplementation(async entry => { if (entry.status === "attempting") expect(writes()).toHaveLength(0); });
   const result = await runWalletTxnsReconcile({ ...options, execute: true, expectAmount: 123 }, deps);
   expect(result).toMatchObject({ mode: "execute", created: { wallet_txn_id: 8, deal_ids: [6] } });
+  expect(fetchFn.mock.calls.map(c => new URL(c[0]).pathname)).toEqual(["/api/1/wallet_txns/8", "/api/1/deals/6", "/api/1/wallet_txns/8/reconcile", "/api/1/wallet_txns/8", "/api/1/deals/6"]);
+  expect(fetchFn.mock.calls.every(c => c[1]?.method === "POST" || new URL(c[0]).searchParams.get("company_id") === "1")).toBe(true);
+  expect(result).toHaveProperty("readback", { walletTxnReconciled: true, dealCompanyMatches: true, dealSettled: true, dealTypeMatches: true });
   expect(writes()).toHaveLength(1);
   expect(new URL(writes()[0]![0]).pathname).toBe("/api/1/wallet_txns/8/reconcile");
   expect(JSON.parse(writes()[0]![1]!.body as string)).toEqual({ company_id: 1, deals: [{ deal_id: 6, amount: 123 }] });
@@ -204,4 +210,40 @@ it.each([[6, 7], [6, 6], [], [7], [7, 6]].map(dealIds => ({ dealIds })))("要求
   expect(writes()).toHaveLength(1);
   expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["attempting", "failed"]);
   expect(deps.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", write_state: "succeeded", reason: "invalid_response" }));
+});
+
+it.each([
+  ["audit", { status: 1 }, {}],
+  ["walletTxnReconciled", { id: 9 }, {}],
+  ["walletTxnReconciled", { company_id: 9 }, {}],
+  ["walletTxnReconciled", { status: 1 }, {}],
+  ["walletTxnReconciled", { due_amount: 1 }, {}],
+  ["dealCompanyMatches", {}, { id: 9 }],
+  ["dealCompanyMatches", {}, { company_id: 9 }],
+  ["dealSettled", {}, { status: "unsettled" }],
+  ["dealSettled", {}, { due_amount: 1 }],
+  ["dealSettled", {}, { due_amount: "0" }],
+  ["dealTypeMatches", {}, { type: "income" }],
+  ["dealTypeMatches", {}, { type: null }],
+  ...["wallet", "deal"].flatMap(target => ["http", "network", "json", "missing"].map(failure => [target + ":" + failure, {}, {}])),
+] as [string, Record<string, unknown>, Record<string, unknown>][])("読み戻し不成立%sは書込済み監査と再実行禁止の例外を返す", async (failure, readWallet, readDeal) => {
+  const { deps, fetchFn, writes } = setup({}, {}, readWallet, readDeal);
+  if (failure === "audit") deps.appendAudit.mockImplementation(async entry => { if (entry.reason === "readback_failed") throw new Error("fictional audit failure"); });
+  const original = fetchFn.getMockImplementation()!;
+  fetchFn.mockImplementation(async (url, init) => {
+    if (writes().length > 0 && init?.method !== "POST" && new URL(url).pathname.includes(failure.startsWith("wallet:") ? "/wallet_txns/" : failure.startsWith("deal:") ? "/deals/" : "never")) {
+      if (failure.endsWith(":network")) throw new Error("fictional disconnect");
+      if (failure.endsWith(":http")) return new Response("{}", { status: 500 });
+      if (failure.endsWith(":json")) return new Response("invalid-json");
+      return new Response("{}");
+    }
+    return original(url, init);
+  });
+  const error = await runWalletTxnsReconcile({ ...options, execute: true, expectAmount: 123 }, deps).catch(e => e);
+  expect(error).toBeInstanceOf(Error);
+  expect(error.message).toMatch(/消込済み/);
+  expect(error.message).toMatch(/再実行しない/);
+  expect(writes()).toHaveLength(1);
+  expect(deps.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", write_state: "succeeded", reason: "readback_failed" }));
+  if (failure !== "audit" && !failure.includes(":")) expect(deps.appendAudit.mock.calls.at(-1)![0].guards).toHaveProperty(failure, false);
 });

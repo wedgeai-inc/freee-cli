@@ -52,14 +52,19 @@ it.each([
   expect(fetchFn).not.toHaveBeenCalled();
 });
 it("CLIのexecuteでフラットな成功応答とcreated_idなしの監査を返す", async () => {
-  const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => new Response(JSON.stringify(init?.method === "POST"
+  let posted = false;
+  const fetchFn = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    if (init?.method === "POST") posted = true;
+    return new Response(JSON.stringify(init?.method === "POST"
     ? { wallet_txn_id: 8, deal_ids: [6], new_deal_id: null }
     : new URL(String(url)).pathname.includes("wallet_txns/")
-      ? { wallet_txn: { id: 8, company_id: 1, date: "2026-01-15", amount: 123, due_amount: 123, entry_side: "expense", status: 1 } }
-      : { deal: { id: 6, company_id: 1, type: "expense", issue_date: "2026-01-15", due_amount: 123, status: "unsettled" } })));
+      ? { wallet_txn: { id: 8, company_id: 1, date: "2026-01-15", amount: 123, due_amount: posted ? 0 : 123, entry_side: "expense", status: posted ? 2 : 1 } }
+      : { deal: { id: 6, company_id: 1, type: "expense", issue_date: "2026-01-15", due_amount: posted ? 0 : 123, status: posted ? "settled" : "unsettled" } }));
+  });
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   await createProgram().parseAsync([...args, "--execute", "--expect-amount", "123", "--log-dir", logDir], { from: "user" });
   expect(JSON.parse(log.mock.calls[0]![0])).toMatchObject({ created: { wallet_txn_id: 8, deal_ids: [6] } });
+  expect(JSON.parse(log.mock.calls[0]![0]).readback).toEqual({ walletTxnReconciled: true, dealCompanyMatches: true, dealSettled: true, dealTypeMatches: true });
   expect(fetchFn.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
   const entries = (await readFile(join(logDir, (await readdir(logDir))[0]!), "utf8")).trim().split("\n").map(line => JSON.parse(line));
   expect(entries.map(e => e.status)).toEqual(["attempting", "succeeded"]);

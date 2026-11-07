@@ -66,6 +66,7 @@ export async function runWalletTxnsReconcile(opts: WalletTxnsReconcileOptions, d
     partnerName = (await runPartnersGet({ companyId: opts.companyId, id: partnerId as number }, { client })).name ?? null;
   }
   let created: { wallet_txn_id: number; deal_ids: number[] } | undefined;
+  let readback: Record<string, boolean> | undefined;
   if (!opts.execute) {
     await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), ...(failedGuards.length > 0 ? { status: "guard_failed", guards } as const : { status: "planned" } as const) });
   } else {
@@ -80,6 +81,24 @@ export async function runWalletTxnsReconcile(opts: WalletTxnsReconcileOptions, d
       if (unexpectedAdjustment && error instanceof Error) error.message = `想定外の差額取引が作られた。${error.message}`;
       throw error;
     }
+    try {
+      const walletResponse: unknown = await (await client.get(`/api/1/wallet_txns/${opts.walletTxnId}`, { query: { company_id: opts.companyId } })).json();
+      const updatedWallet = isRecord(walletResponse) ? walletResponse.wallet_txn : undefined;
+      const dealResponse: unknown = await (await client.get(`/api/1/deals/${opts.dealId}`, { query: { company_id: opts.companyId } })).json();
+      const updatedDeal = isRecord(dealResponse) ? dealResponse.deal : undefined;
+      readback = {
+        walletTxnReconciled: isRecord(updatedWallet) && updatedWallet.id === opts.walletTxnId && updatedWallet.company_id === opts.companyId && updatedWallet.status === 2 && updatedWallet.due_amount === 0,
+        dealCompanyMatches: isRecord(updatedDeal) && updatedDeal.id === opts.dealId && updatedDeal.company_id === opts.companyId,
+        dealSettled: isRecord(updatedDeal) && updatedDeal.status === "settled" && updatedDeal.due_amount === 0,
+        dealTypeMatches: isRecord(updatedDeal) && (wallet.entry_side === "income" || wallet.entry_side === "expense") && updatedDeal.type === wallet.entry_side,
+      };
+      if (Object.values(readback).some(ok => !ok)) throw new Error("readback mismatch");
+    } catch {
+      try {
+        await deps.appendAudit({ ...base, timestamp: deps.now().toISOString(), status: "failed", write_state: "succeeded", reason: "readback_failed", ...(readback === undefined ? {} : { guards: readback }) });
+      } catch { /* 監査失敗でも、書き込み済みであることを伝える例外を優先する。 */ }
+      throw Object.assign(new Error(`読み戻しに失敗。消込済みの可能性があります (wallet_txn_id=${opts.walletTxnId}, deal_id=${opts.dealId})。再実行しないでください。deals getで確認してください`), { readback });
+    }
   }
-  return { mode, payload, wallet_txn: { id: wallet.id, date: wallet.date ?? null, amount: wallet.amount ?? null, entry_side: wallet.entry_side ?? null, status: wallet.status ?? null, due_amount: wallet.due_amount ?? null, walletable_type: wallet.walletable_type ?? null, walletable_id: wallet.walletable_id ?? null }, deal: { id: deal.id, type: deal.type ?? null, issue_date: deal.issue_date ?? null, amount: deal.amount ?? null, due_amount: deal.due_amount ?? null, partner_id: partnerId, partner_name: partnerName }, guards, ...(created === undefined ? {} : { created }) };
+  return { mode, payload, wallet_txn: { id: wallet.id, date: wallet.date ?? null, amount: wallet.amount ?? null, entry_side: wallet.entry_side ?? null, status: wallet.status ?? null, due_amount: wallet.due_amount ?? null, walletable_type: wallet.walletable_type ?? null, walletable_id: wallet.walletable_id ?? null }, deal: { id: deal.id, type: deal.type ?? null, issue_date: deal.issue_date ?? null, amount: deal.amount ?? null, due_amount: deal.due_amount ?? null, partner_id: partnerId, partner_name: partnerName }, guards, ...(created === undefined ? {} : { created, readback }) };
 }
