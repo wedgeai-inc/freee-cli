@@ -7,7 +7,7 @@ const bytes = Buffer.from("fictional pdf content");
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 const options = { companyId: 1, file: "fixtures/sample.pdf", issueDate: "2026-01-15", description: "架空証憑", logDir: "unused", taskId: "sample" };
 function setup() {
-  const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ receipt: { id: 5 } })));
+  const fetchFn = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ receipt: { id: 5, receipt_metadatum: { issue_date: options.issueDate } } })));
   const client = new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: "test-token", fetchFn });
   const getClient = vi.fn(async () => client);
   const readFile = vi.fn(async () => bytes);
@@ -23,7 +23,7 @@ it("64MiBちょうどは許可し、1バイト超過はdry-runとexecuteとも�
       const upload = runReceiptsUpload({ ...options, execute, expectSha256: createHash("sha256").update(content).digest("hex") }, { ...deps, readFile: vi.fn(async () => content) });
       if (size === limit) {
         expect((await upload).file.size).toBe(limit);
-        expect(fetchFn).toHaveBeenCalledTimes(execute ? 1 : 0);
+        expect(fetchFn).toHaveBeenCalledTimes(execute ? 2 : 0);
         expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(execute ? ["attempting", "succeeded"] : ["planned"]);
       } else {
         await expect(upload).rejects.toThrow(`receipt upload: file size ${size} bytes exceeds limit ${limit} bytes`);
@@ -46,7 +46,7 @@ it("dry-runはファイル名・サイズ・MIME・SHA-256・送信予定項目�
   expect(audit).not.toContain("架空証憑");
   expect(deps.appendAudit.mock.calls[0]![0].payload_redacted).toEqual({ company_id: 1, receipt_metadatum_issue_date: "[REDACTED]", description: "[REDACTED]" });
 });
-it("executeはハッシュ一致した同じバイト列だけをmultipartで送る", async () => {
+it("executeは同じバイト列をmultipartで送りcompany_idなしの応答を読み戻す", async () => {
   for (const expectSha256 of [undefined, "b".repeat(64), "invalid"]) {
     const { deps, fetchFn } = setup();
     await expect(runReceiptsUpload({ ...options, execute: true, expectSha256 }, deps)).rejects.toThrow("--expect-sha256");
@@ -56,6 +56,10 @@ it("executeはハッシュ一致した同じバイト列だけをmultipartで送
   const { deps, fetchFn } = setup();
   const result = await runReceiptsUpload({ ...options, execute: true, expectSha256: sha256 }, deps);
   expect(result).toMatchObject({ mode: "execute", created: { id: 5 } });
+  expect(result.readback).toEqual({ issueDateMatches: true });
+  const readbackUrl = new URL(fetchFn.mock.calls[1]![0]);
+  expect(readbackUrl.pathname).toBe("/api/1/receipts/5");
+  expect(readbackUrl.searchParams.get("company_id")).toBe("1");
   expect(deps.readFile).toHaveBeenCalledTimes(1);
   const init = fetchFn.mock.calls[0]![1];
   const form = init.body as FormData;
@@ -104,4 +108,30 @@ it("dry-runは指定されたハッシュの一致・不一致・形式不正を
     expect(fetchFn).not.toHaveBeenCalled();
     expect(deps.appendAudit.mock.calls.map(c => c[0].status)).toEqual(["planned"]);
   }
+});
+
+it.each([undefined, 0, -999999999999, 999999999999])("metadata amount %sをmultipartで送り読み戻す", async amount => {
+  const { deps, fetchFn } = setup();
+  fetchFn.mockImplementation(async () => new Response(JSON.stringify({ receipt: { id: 5, receipt_metadatum: { issue_date: options.issueDate, partner_name: "架空発行元", amount } } })));
+  const result = await runReceiptsUpload({ ...options, partnerName: "架空発行元", amount, execute: true, expectSha256: sha256 }, deps);
+  expect(result.readback).toEqual({ issueDateMatches: true, partnerNameMatches: true, ...(amount === undefined ? {} : { amountMatches: true }) });
+  const form = fetchFn.mock.calls[0]![1].body as FormData;
+  expect(form.get("receipt_metadatum_partner_name")).toBe("架空発行元");
+  expect(form.get("receipt_metadatum_amount")).toBe(amount === undefined ? null : String(amount));
+  expect(JSON.stringify(deps.appendAudit.mock.calls)).not.toContain("架空発行元");
+});
+it.each([{ amount: 1.5 }, { amount: NaN }, { amount: 1000000000000 }, { amount: -1000000000000 }, { partnerName: "a".repeat(256) }])("metadata不正値%jは認証前に拒否", async patch => {
+  const { deps } = setup();
+  await expect(runReceiptsUpload({ ...options, ...patch }, deps)).rejects.toThrow();
+  expect(deps.getClient).not.toHaveBeenCalled();
+  expect(deps.readFile).not.toHaveBeenCalled();
+});
+it.each(["mismatch", "partner", "amount", "missing-metadata", "wrong-company", "network", "audit"]) ("upload後の%s失敗は作成済みIDと再実行禁止を示す", async failure => {
+  const { deps, fetchFn } = setup();
+  if (failure === "network") fetchFn.mockResolvedValueOnce(new Response(JSON.stringify({ receipt: { id: 5 } }))).mockRejectedValueOnce(new Error("private error"));
+  else fetchFn.mockResolvedValueOnce(new Response(JSON.stringify({ receipt: { id: 5 } }))).mockResolvedValueOnce(new Response(JSON.stringify({ receipt: { id: 5, ...(failure === "wrong-company" ? { company_id: 2 } : {}), receipt_metadatum: failure === "missing-metadata" ? null : { issue_date: failure === "mismatch" || failure === "audit" ? "2026-01-16" : options.issueDate, partner_name: failure === "partner" ? "架空別発行元" : "架空発行元", amount: failure === "amount" ? 1 : 0 } } })));
+  if (failure === "audit") deps.appendAudit.mockImplementation(async entry => { if (entry.reason === "readback_failed") throw new Error("disk"); });
+  await expect(runReceiptsUpload({ ...options, partnerName: "架空発行元", amount: 0, execute: true, expectSha256: sha256 }, deps)).rejects.toThrow(/作成済み.*receipt_id=5.*再実行しない/);
+  expect(deps.appendAudit.mock.calls.at(-1)![0]).toMatchObject({ status: "failed", write_state: "succeeded", created_id: 5, reason: "readback_failed" });
+  expect(fetchFn.mock.calls.filter(c => c[1]?.method === "POST")).toHaveLength(1);
 });

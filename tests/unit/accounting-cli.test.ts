@@ -7,7 +7,7 @@ import { parseRuntimePlan } from "../../src/lib/runtime-oauth.js";
 import { PublicFreeeClient } from "../../src/lib/clients/freee-public-client.js";
 vi.mock("../../src/lib/token-config-loader.js", () => ({ loadApiAuth: vi.fn(async () => ({ accessToken: "test-token" })) }));
 afterEach(() => vi.restoreAllMocks());
-it("8コマンドをCLIから利用でき、runtime OAuthはreceiptsと旧export形式を区別する", async () => {
+it("9コマンドをCLIから利用でき、runtime OAuthはreceiptsと旧export形式を区別する", async () => {
   const dir = await mkdtemp(join(tmpdir(), "freee-cli-test-"));
   try {
     await writeFile(join(dir, "sample.pdf"), "fictional pdf");
@@ -18,7 +18,7 @@ it("8コマンドをCLIから利用でき、runtime OAuthはreceiptsと旧export
         : path.includes("partners/") ? { partner: { id: 2, company_id: 1, name: "架空取引先" } }
         : path.endsWith("deals") ? { deals: [] }
         : path.includes("deals/") ? { deal: { id: 6, company_id: 1, type: "expense", issue_date: "2026-01-15", partner_id: 2, amount: 1500, details: [{ id: 9, account_item_id: 3, tax_code: 4, amount: 1500, vat: 136 }], receipts: [] } }
-        : { receipt: { id: 5, company_id: 1 } };
+        : { receipt: { id: 5 } };
       return new Response(JSON.stringify(body));
     });
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -26,11 +26,13 @@ it("8コマンドをCLIから利用でき、runtime OAuthはreceiptsと旧export
       ["account-items", "list"], ["taxes", "list"], ["deals", "list", "--partner-id", "2", "--type", "expense", "--start-issue-date", "2026-01-01", "--end-issue-date", "2026-01-31", "--status", "unsettled"], ["deals", "get", "6"], ["receipts", "get", "5"],
       ["deals", "create", "--type", "expense", "--issue-date", "2026-01-15", "--partner-id", "2", "--detail", "account_item_id=3,tax_code=4,amount=1500", "--log-dir", dir],
       ["deals", "attach-receipt", "6", "--receipt-id", "5", "--log-dir", dir],
-      ["receipts", "upload", "--file", join(dir, "sample.pdf"), "--issue-date", "2026-01-15", "--log-dir", dir],
+      ["receipts", "upload", "--file", join(dir, "sample.pdf"), "--issue-date", "2026-01-15", "--partner-name", "架空発行元", "--amount", "0", "--log-dir", dir],
+      ["receipts", "update", "5", "--partner-name", "架空発行元", "--issue-date", "2026-01-15", "--amount", "-123", "--log-dir", dir],
     ].map(args => [...args, "--company-id", "1"]);
     expect(parseRuntimePlan(JSON.stringify({ commands }))).toEqual(commands);
     for (const args of commands) await createProgram().parseAsync(args, { from: "user" });
-    expect(log).toHaveBeenCalledTimes(8);
+    expect(log).toHaveBeenCalledTimes(9);
+    expect(JSON.parse(String(log.mock.calls.at(-1)![0]))).toMatchObject({ mode: "dry-run", payload: { company_id: 1, receipt_metadatum: { partner_name: "架空発行元", issue_date: "2026-01-15", amount: -123 } } });
     expect(fetchFn.mock.calls.every(c => c[1]?.method === "GET")).toBe(true);
     expect(parseRuntimePlan(JSON.stringify({ commands: [["receipts", "--company-id", "1", "--out", "sample"]] }))[0]).toEqual(["export", "receipts", "--company-id", "1", "--out", "sample"]);
   } finally { await rm(dir, { recursive: true }); }
@@ -81,4 +83,11 @@ it("負の取引合計もexpect-totalで完全一致を確認して証憑を追�
     const payload = JSON.parse(fetchFn.mock.calls[1]![1]!.body as string);
     expect(payload.details).toEqual([{ id: 9, account_item_id: 3, tax_code: 0, amount: -300, vat: -27 }]);
   } finally { await rm(dir, { recursive: true }); }
+});
+
+it.each([[], ["--amount", "1.5"], ["--amount", "1e2"], ["--amount", ""], ["--amount", "1000000000000"], ["--issue-date", "2026-02-30"]].map(flags => [flags]))("receipts updateの不正入力%jは認証前に拒否", async flags => {
+  const { loadApiAuth } = await import("../../src/lib/token-config-loader.js");
+  vi.mocked(loadApiAuth).mockClear();
+  await expect(createProgram().parseAsync(["receipts", "update", "5", "--company-id", "1", ...flags], { from: "user" })).rejects.toThrow(flags[0] === "--amount" ? "amount" : flags.length ? "issue_date" : "specify");
+  expect(loadApiAuth).not.toHaveBeenCalled();
 });

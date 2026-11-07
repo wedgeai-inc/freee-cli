@@ -82,7 +82,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | `deals create` | 書き込み（dry-run既定） |
 | `deals attach-receipt <id>` | 書き込み（dry-run既定） |
 | `deals payments create <deal-id>` | 書き込み（dry-run既定） |
-| `receipts upload` | 書き込み（dry-run既定） |
+| `receipts upload` / `update <id>` | 書き込み（dry-run既定） |
 | `expense list` | 読み取り |
 | `export receipts` / `journals` / `wallet-txns` / `expense-applications` | 読み取り（ローカルへ保存） |
 
@@ -163,6 +163,17 @@ freee receipts upload --company-id 1 --file ./sample.pdf \
 ```
 
 ファイル名・バイト数・拡張子から推定したMIME・SHA-256・送信予定項目をJSONで表示します。dry-runでは認証も送信も行いません。実行する場合は表示されたハッシュを確認して、同じ引数に`--execute --expect-sha256 <確認したSHA-256>`を追加します。一致したバイト列をメモリ上に保持してmultipartで送信し、結果の`created.id`に`receipt.id`を出力します。ファイルの内容は監査ログに保存しません。ファイルサイズは64MBまで（単位が未定義のため64×1024×1024バイトと解釈し、上限ちょうどは許可）で、超過時は認証・監査ログの記録前にエラーにします。dry-runで`--expect-sha256`を指定すると、`checks.expectSha256`に期待値・実際のハッシュ・一致結果を返し、形式不正や不一致の理由も表示します。不一致でも送信せず、監査ログは`planned`のままです。
+
+`--partner-name`（発行元、255文字以内）と`--amount`（整数、-999999999999〜999999999999）も任意で指定できます。`--issue-date`は引き続き必須です。実行後は`receipts get`で読み戻し、`readback.issueDateMatches`と、指定時だけ`partnerNameMatches`・`amountMatches`を返します。読み戻しの失敗や不一致は作成済みIDを含むエラーになり、非0で終了します。再実行せず`receipts get`で確認してください。
+
+#### 証憑メタデータの更新（dry-run既定）
+
+```bash
+freee receipts update 5 --company-id 1 --partner-name '架空発行元' \
+  --issue-date 2026-01-15 --amount 1500
+```
+
+`--partner-name`・`--issue-date`・`--amount`のうち1つ以上を指定します。文字数と金額の範囲はuploadと同じです。GETのクエリとPUTの本文に指定の`company_id`を送り、応答の証憑IDが指定のIDと一致することを確認します。応答の`company_id`は存在する場合だけ一致を確かめ、欠けていても失敗にはしません。dry-runでは`current`と`payload`を表示します。`--execute`を付けると指定した項目だけを`receipt_metadatum`に入れてPUTし、指定しなかった項目は送信しません。実行後はGETで読み戻し、指定した項目だけの一致を`readback`に返します。読み戻し失敗や不一致は更新済みIDを含むエラーになり、非0で終了します。再実行せず`receipts get`で確認してください。`--log-dir`（既定`./audit-logs`）・`--task-id`も指定できます。更新前の値は標準出力の`current`で確認できます。更新前のメタデータと送信内容は監査ログにも記録し、発行元は既存の規則で伏せ、金額は既存の監査と同様に記録します。upload・updateとも読み戻し失敗時は`write_state: succeeded`・`reason: readback_failed`を残します。
 
 #### 未決済取引の作成（dry-run既定）
 
@@ -666,6 +677,7 @@ plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最�
 | `deals payments create` |
 | `receipts get` |
 | `receipts upload` |
+| `receipts update` |
 | `partners search` |
 | `partners create` |
 | `partners get` |
