@@ -26,7 +26,7 @@ describe("build entrypoint", () => {
 
     expect(commandNames(run("--help")).sort()).toEqual([...PUBLIC_ROOT_COMMANDS].sort());
     expect(commandNames(run("expense", "--help"))).toEqual(["list"]);
-    expect(commandNames(run("wallet-txns", "--help"))).toEqual(["list", "reconcile"]);
+    expect(commandNames(run("wallet-txns", "--help"))).toEqual(["list", "reconcile", "create-deal"]);
     expect(commandNames(run("deals", "payments", "--help"))).toEqual(["create"]);
     for (const name of REMOVED_COMMANDS) {
       expect(run("--help")).not.toMatch(new RegExp(`^  ${name}\\b`, "m"));

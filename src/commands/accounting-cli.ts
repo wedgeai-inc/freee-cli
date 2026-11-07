@@ -1,3 +1,4 @@
+import { runWalletTxnsCreateDeal } from "./wallet-txns/create-deal.js";
 import { runWalletTxnsReconcile } from "./wallet-txns/reconcile.js";
 import { runWalletTxnsList, validateWalletTxnsListOptions, type WalletTxnsListOptions } from "./wallet-txns/list.js";
 import type { ReadOnlyClient } from "../lib/clients/read-only-client.js";
@@ -65,6 +66,25 @@ export function registerAccountingCommands(program: Command, getClient: () => Pr
         walletTxnId: parsePositiveIntegerOption(walletTxnId, "wallet-txn-id"),
         companyId: parseCompanyId(opts.companyId), dealId: parsePositiveIntegerOption(opts.dealId, "--deal-id"),
         amount: parsePositiveIntegerOption(opts.amount, "--amount"),
+        expectAmount: opts.expectAmount === undefined ? undefined : parsePositiveIntegerOption(opts.expectAmount, "--expect-amount"),
+        expectDate: opts.expectDate, execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId,
+      }, { getClient, appendAudit: entry => appendAccountingAudit(opts.logDir, entry), now: () => new Date() });
+      output(result);
+      if (result.mode === "dry-run" && Object.values(result.guards).some(ok => !ok)) process.exitCode = 1;
+    });
+  writeOptions(walletTxns.command("create-deal <wallet-txn-id>"))
+    .requiredOption("--partner-id <id>").requiredOption("--account-item-id <id>")
+    .requiredOption("--tax-code <n>").requiredOption("--amount <n>")
+    .option("--issue-date <YYYY-MM-DD>").option("--description <text>")
+    .option("--expect-amount <n>").option("--expect-date <YYYY-MM-DD>")
+    .action(async (walletTxnId, opts) => {
+      const result = await runWalletTxnsCreateDeal({
+        walletTxnId: parsePositiveIntegerOption(walletTxnId, "wallet-txn-id"),
+        companyId: parseCompanyId(opts.companyId), partnerId: parsePositiveIntegerOption(opts.partnerId, "--partner-id"),
+        accountItemId: parsePositiveIntegerOption(opts.accountItemId, "--account-item-id"),
+        taxCode: /^[0-9]+$/.test(opts.taxCode) ? Number(opts.taxCode) : NaN,
+        amount: parsePositiveIntegerOption(opts.amount, "--amount"),
+        issueDate: opts.issueDate, description: opts.description,
         expectAmount: opts.expectAmount === undefined ? undefined : parsePositiveIntegerOption(opts.expectAmount, "--expect-amount"),
         expectDate: opts.expectDate, execute: Boolean(opts.execute), logDir: opts.logDir, taskId: opts.taskId,
       }, { getClient, appendAudit: entry => appendAccountingAudit(opts.logDir, entry), now: () => new Date() });

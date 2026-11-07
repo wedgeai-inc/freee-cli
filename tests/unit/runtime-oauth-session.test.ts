@@ -30,11 +30,12 @@ describe("RuntimeOAuthGate", () => {
 });
 
 describe("runRuntimePlan", () => {
-  it("消込planの4コマンドを検証してCLI引数とexecuteガードをそのまま子へ渡す", async () => {
+  it("消込planの5コマンドを検証してCLI引数とexecuteガードをそのまま子へ渡す", async () => {
     const commands = [
       ["wallet-txns", "list", "--company-id", "1"],
       ["walletables", "list", "--company-id", "1"],
       ["wallet-txns", "reconcile", "8", "--company-id", "1", "--deal-id", "6", "--amount", "123", "--execute", "--expect-amount", "123", "--expect-date", "2026-01-15"],
+      ["wallet-txns", "create-deal", "8", "--company-id", "1", "--partner-id", "3", "--account-item-id", "4", "--tax-code", "0", "--amount", "123", "--execute", "--expect-amount", "123", "--expect-date", "2026-01-15"],
       ["deals", "payments", "create", "6", "--company-id", "1", "--date", "2026-01-15", "--from-walletable-type", "wallet", "--from-walletable-id", "2", "--amount", "123", "--execute", "--expect-amount", "123"],
     ];
     const spawnFn = vi.fn(() => {
