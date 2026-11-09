@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { formatCompaniesList, runCompaniesList } from "../../src/commands/companies/list.js";
+import { createProgram } from "../../src/cli.js";
+import { OnePasswordTokenStore, TokenStoreUpdateError } from "../../src/lib/one-password-token-store.js";
 import { PublicFreeeClient } from "../../src/lib/clients/freee-public-client.js";
 
 function jsonRes(body: unknown): Response {
@@ -57,5 +59,31 @@ describe("runCompaniesList field mapping", () => {
     const result = await runCompaniesList({ client });
     expect(result.items[0]).toEqual({ id: 1, name: "A", display_name: "A社", role: "admin", company_number: "abc" });
     expect(JSON.stringify(result.items)).not.toContain("secret_flag");
+  });
+});
+
+describe("companies list authentication failure", () => {
+  it("does not call the companies API or write stdout when saving refreshed tokens fails", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const fetchFn = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: 21600 })));
+    vi.stubGlobal("fetch", fetchFn);
+    vi.stubEnv("FREEE_ACCESS_TOKEN", undefined);
+    vi.stubEnv("FREEE_CLIENT_ID", "synthetic-client");
+    vi.stubEnv("FREEE_CLIENT_SECRET", "synthetic-secret");
+    vi.spyOn(OnePasswordTokenStore.prototype, "load").mockResolvedValue({ accessToken: "expired", refreshToken: "old", expiresAt: 1 });
+    vi.spyOn(OnePasswordTokenStore.prototype, "save").mockRejectedValue(new TokenStoreUpdateError("preread", "get", "nonzero"));
+    try {
+      const error = await createProgram().parseAsync(["companies", "list", "--format", "table"], { from: "user" }).catch((error: unknown) => error);
+      expect(error).toMatchObject({ message: "freee OAuth token store could not be updated", stage: "preread", operation: "get", category: "nonzero" });
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+      expect(String(fetchFn.mock.calls[0]?.[0])).toBe("https://accounts.secure.freee.co.jp/public_api/token");
+      expect(stdout).not.toHaveBeenCalled();
+      expect(`${String(error)} ${JSON.stringify(error)} ${JSON.stringify(stderr.mock.calls)}`).not.toContain("synthetic-");
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 });

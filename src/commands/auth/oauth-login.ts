@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { exchangeAuthorizationCode, type RuntimeOAuthConfig } from "../../lib/runtime-oauth.js";
 import { createRuntimeOAuthHandler } from "../../lib/runtime-oauth-http.js";
 import { RuntimeOAuthGate } from "../../lib/runtime-oauth-session.js";
-import type { OAuthTokenBundle } from "../../lib/one-password-token-store.js";
+import { sanitizeTokenStoreUpdateError, type OAuthTokenBundle } from "../../lib/one-password-token-store.js";
 
 const REDIRECT_URI = "http://127.0.0.1:54321/callback";
 const START_URL = "http://127.0.0.1:54321/start";
@@ -28,8 +28,8 @@ export async function persistInitialOAuthTokens(
       refreshToken: tokens.refreshToken,
       expiresAt: now() + tokens.expiresIn * 1000,
     });
-  } catch {
-    throw new Error("freee OAuth token store could not be updated");
+  } catch (error) {
+    throw sanitizeTokenStoreUpdateError(error);
   }
 }
 

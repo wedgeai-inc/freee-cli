@@ -7,6 +7,41 @@ export interface OAuthTokenBundle {
   expiresAt: number;
 }
 
+export type TokenStoreStage = "preread" | "edit" | "readback" | "mismatch";
+export type OpOperation = "get" | "edit";
+export type OpFailureCategory = "nonzero" | "timeout" | "stdin" | "spawn";
+
+class OpCommandError extends Error {
+  constructor(message: string, readonly category: OpFailureCategory) {
+    super(message);
+  }
+}
+
+function opFailureCategory(error: unknown): OpFailureCategory | undefined {
+  return error instanceof OpCommandError ? error.category : undefined;
+}
+
+/** Only closed diagnostics are retained; never attach the original exception. */
+export class TokenStoreUpdateError extends Error {
+  readonly stage?: TokenStoreStage;
+  readonly operation?: OpOperation;
+  readonly category?: OpFailureCategory;
+
+  constructor(stage?: TokenStoreStage, operation?: OpOperation, category?: OpFailureCategory) {
+    super("freee OAuth token store could not be updated");
+    if (stage === "preread" || stage === "edit" || stage === "readback" || stage === "mismatch") this.stage = stage;
+    if (operation === "get" || operation === "edit") this.operation = operation;
+    if (category === "nonzero" || category === "timeout" || category === "stdin" || category === "spawn") this.category = category;
+  }
+}
+
+/** Reconstruct rather than rethrow, so even added properties cannot cross the boundary. */
+export function sanitizeTokenStoreUpdateError(error: unknown): TokenStoreUpdateError {
+  return error instanceof TokenStoreUpdateError
+    ? new TokenStoreUpdateError(error.stage, error.operation, error.category)
+    : new TokenStoreUpdateError();
+}
+
 export type OpRun = (args: readonly string[], stdin?: string) => Promise<{ stdout: string }>;
 export type OAuthItemResolver = (profile: string) => string;
 export type OAuthVaultResolver = (profile: string) => string | undefined;
@@ -87,16 +122,26 @@ export class OnePasswordTokenStore {
     validateBundle(bundle);
     const reference = this.#resolveItem(profile);
     const vault = this.#resolveVault(profile);
-    const item = await this.#readItemWithReference(reference, vault);
-    const template = replaceBundle(item, bundle);
+    let template: ReturnType<typeof replaceBundle>;
+    try {
+      const item = await this.#readItemWithReference(reference, vault);
+      template = replaceBundle(item, bundle);
+    } catch (error) {
+      throw new TokenStoreUpdateError("preread", "get", opFailureCategory(error));
+    }
     try {
       // The template, including credentials, is intentionally supplied only on stdin.
       await this.#run(withVault(["item", "edit", reference], vault), `${JSON.stringify(template)}\n`);
-      const saved = await this.#readItemWithReference(reference, vault);
-      if (!bundlesMatch(readBundle(saved), bundle)) throw new Error("read-back mismatch");
-    } catch {
-      throw new Error("freee OAuth token store could not be updated");
+    } catch (error) {
+      throw new TokenStoreUpdateError("edit", "edit", opFailureCategory(error));
     }
+    let saved: OAuthTokenBundle;
+    try {
+      saved = readBundle(await this.#readItemWithReference(reference, vault));
+    } catch (error) {
+      throw new TokenStoreUpdateError("readback", "get", opFailureCategory(error));
+    }
+    if (!bundlesMatch(saved, bundle)) throw new TokenStoreUpdateError("mismatch");
   }
 
   async #readItem(profile: string): Promise<OnePasswordItem> {
@@ -109,7 +154,9 @@ export class OnePasswordTokenStore {
       // --reveal が無いと concealed field がマスク値で返り、token の読み出しと
       // read-back 照合の両方が壊れる（op item get の既定は conceal）
       ({ stdout } = await this.#run(withVault(["item", "get", reference, "--format", "json", "--reveal"], vault)));
-    } catch {
+    } catch (error) {
+      const category = opFailureCategory(error);
+      if (category) throw new OpCommandError("freee OAuth token store could not be read", category);
       throw new Error("freee OAuth token store could not be read");
     }
     try {
@@ -364,7 +411,13 @@ export function runOp(
       reject(new Error("op command timeout is invalid"));
       return;
     }
-    const child = options.spawnFn?.(args) ?? defaultSpawnOp(args);
+    let child: OpChild;
+    try {
+      child = options.spawnFn?.(args) ?? defaultSpawnOp(args);
+    } catch {
+      reject(new OpCommandError("op command failed", "spawn"));
+      return;
+    }
     let stdout = "";
     let settled = false;
     // detached でプロセスグループを分けたため、親が受ける停止シグナルは子へ届かない。
@@ -399,8 +452,7 @@ export function runOp(
       if (killer) { clearTimeout(killer); killer = undefined; }
     });
     const timeout = setTimeout(() => {
-      killPipeline("SIGTERM");
-      finish(new Error("op command timed out"));
+      finish(new OpCommandError("op command timed out", "timeout"));
     }, timeoutMs);
     const finish = (error?: Error, result?: { stdout: string }) => {
       if (settled) return;
@@ -417,12 +469,12 @@ export function runOp(
     // 配線の途中で例外が出ても、登録したまま抜けない（handler が張りっぱなしになる）
     try {
       child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
-      child.once("error", () => finish(new Error("op command failed")));
-      child.once("close", (code: number | null) => code === 0 ? finish(undefined, { stdout }) : finish(new Error("op command failed")));
-      child.stdin.on("error", () => finish(new Error("op stdin failed")));
+      child.once("error", () => finish(new OpCommandError("op command failed", "spawn")));
+      child.once("close", (code: number | null) => code === 0 ? finish(undefined, { stdout }) : finish(new OpCommandError("op command failed", "nonzero")));
+      child.stdin.on("error", () => finish(new OpCommandError("op stdin failed", "stdin")));
       child.stdin.end(stdin);
     } catch {
-      finish(new Error("op stdin failed"));
+      finish(new OpCommandError("op stdin failed", "stdin"));
     }
   });
 }
