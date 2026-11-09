@@ -21,6 +21,9 @@
 - [x] companiesの保存失敗時はAPI非呼出、stdout空
 - [x] loginの保存失敗時は成功通知なし
 - [x] token、item、vault、op出力、raw causeを診断やログに含めない
+- [x] stage / operation / categoryのgetter、Proxyのprototype / descriptor検査失敗をrefresh・loginの境界で無害化
+- [x] 直接saveのpreread / edit / readbackでも診断抽出の例外を無害化
+- [x] getterを実行せず、継承プロパティを除外し、own data propertyの許可enum値だけを保持
 
 ## 検証と未確認事項
 
@@ -29,10 +32,12 @@
 - ベースライン: 対象4ファイル56件成功。
 - 追加した診断の試験は、段階情報・分類・呼び出し側での保持がないことによるRedを確認後、実装してGreenを確認。
 - 対象unit: 4ファイル82件成功（追加26ケース）。
-- `npm test`: 73ファイル、4,193件成功、失敗0件。
+- High指摘修正のベースライン: token store / loginの2ファイル67件成功。
+- High指摘の回帰テスト: 境界6件と直接saveの3段階でRedを確認し、修正後にGreenを確認。追加9ケースと既存の境界入力表を拡張。
+- `npm test`: 73ファイル、4,202件成功、失敗0件。
 - `npm run typecheck`: exit 0。
 - `git diff --check`: exit 0。
-- ローカルChecker: Medium以上の指摘なし。独自の安全なモック検証28件成功、CIの`npm test`への配線を確認。
+- High指摘修正のローカルChecker: 指摘なし。関連17テスト、正常診断75組、revoked Proxy・不正descriptor・primitiveなど9入力を独自に検証。CIの`npm test`への配線も確認。PRの独立セッションレビューの代替にはしない。
 - 実行したVitestは5.0.1。worktreeに依存パッケージがなかったため、既存checkoutの依存パッケージをworktree内のGit対象外`node_modules`へコピーして使用した。設定・lockfileは変更していない。
 - コミット・push・PR作成は行っていない。PRの独立セッションレビューは今回の作業範囲外。
 
@@ -46,6 +51,9 @@
 `runOp`は同期/非同期spawn失敗、stdin失敗、timeout、非正常終了（nullを含む）を固定分類にする。
 timeoutは分類を確定してから終了処理内でkillし、同期closeで分類が上書きされるのを防ぐ。
 refreshとloginのcatchでは許可された追加プロパティだけを新しいエラーへ再構築し、元の例外を保持しない。
+`sanitizeTokenStoreUpdateError`と`opFailureCategory`は型判定・descriptor検査をcatchで囲む。
+own data propertyのenum値だけを読み、getter・継承プロパティを診断に使わない。
+診断抽出自体が失敗した場合も元の例外を保持せず、固定文言へ閉じる。
 CLIの表示文言とloginのログ文言は変更しない。
 
 ## 追加したテスト名
@@ -68,4 +76,12 @@ CLIの表示文言とloginのログ文言は変更しない。
 `tests/unit/companies-list.test.ts`（1ケース）:
 
 - `does not call the companies API or write stdout when saving refreshed tokens fails`
+
+High指摘修正で追加した`tests/unit/one-password-token-store.test.ts`のテスト（9ケース）:
+
+- `closes $name to a secret-free fixed error after refresh and login`（getter3種、Proxy2種）
+- `closes hostile op diagnostics during %s without exposing secrets`（preread/edit/readback）
+- `retains only own enum data properties without invoking getters or proxy get traps`
+
+既存の`drops forged diagnostics and non-enum values at the caller boundary`の入力表にもgetter3種とProxy2種を追加。
 

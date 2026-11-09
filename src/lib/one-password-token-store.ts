@@ -18,7 +18,13 @@ class OpCommandError extends Error {
 }
 
 function opFailureCategory(error: unknown): OpFailureCategory | undefined {
-  return error instanceof OpCommandError ? error.category : undefined;
+  try {
+    return error instanceof OpCommandError
+      ? ownEnumValue(error, "category", ["nonzero", "timeout", "stdin", "spawn"])
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Only closed diagnostics are retained; never attach the original exception. */
@@ -37,9 +43,25 @@ export class TokenStoreUpdateError extends Error {
 
 /** Reconstruct rather than rethrow, so even added properties cannot cross the boundary. */
 export function sanitizeTokenStoreUpdateError(error: unknown): TokenStoreUpdateError {
-  return error instanceof TokenStoreUpdateError
-    ? new TokenStoreUpdateError(error.stage, error.operation, error.category)
-    : new TokenStoreUpdateError();
+  try {
+    if (error instanceof TokenStoreUpdateError) {
+      return new TokenStoreUpdateError(
+        ownEnumValue(error, "stage", ["preread", "edit", "readback", "mismatch"]),
+        ownEnumValue(error, "operation", ["get", "edit"]),
+        ownEnumValue(error, "category", ["nonzero", "timeout", "stdin", "spawn"]),
+      );
+    }
+  } catch {
+    // Even prototype/descriptor inspection can throw for an untrusted Proxy.
+  }
+  return new TokenStoreUpdateError();
+}
+
+function ownEnumValue<T extends string>(object: object, key: string, allowed: readonly T[]): T | undefined {
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  if (!descriptor || !("value" in descriptor)) return undefined;
+  const value: unknown = descriptor.value;
+  return typeof value === "string" && allowed.includes(value as T) ? value as T : undefined;
 }
 
 export type OpRun = (args: readonly string[], stdin?: string) => Promise<{ stdout: string }>;

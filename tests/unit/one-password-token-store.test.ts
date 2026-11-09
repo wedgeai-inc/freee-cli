@@ -7,17 +7,122 @@ import { loadApiAuth } from "../../src/lib/token-config-loader.js";
 import { exchangeAuthorizationCode } from "../../src/lib/runtime-oauth.js";
 import { persistInitialOAuthTokens } from "../../src/commands/auth/oauth-login.js";
 
+const hostileDiagnostics = [
+  ...["stage", "operation", "category"].map((key) => ({
+    name: `throwing ${key} getter`,
+    wrap: (error: Error): unknown => Object.defineProperty(error, key, {
+      get() { throw new Error("synthetic-secret"); },
+    }),
+  })),
+  {
+    name: "throwing getPrototypeOf proxy",
+    wrap: (error: Error): unknown => new Proxy(error, {
+      getPrototypeOf() { throw new Error("synthetic-secret"); },
+    }),
+  },
+  {
+    name: "throwing getOwnPropertyDescriptor proxy",
+    wrap: (error: Error): unknown => new Proxy(error, {
+      getOwnPropertyDescriptor() { throw new Error("synthetic-secret"); },
+      get() { throw new Error("synthetic-secret"); },
+    }),
+  },
+];
+
 describe("OnePasswordTokenStore", () => {
   it("drops forged diagnostics and non-enum values at the caller boundary", () => {
     const forged = Object.assign(new Error("synthetic-secret"), { stage: "edit", operation: "edit", category: "stdin" });
     const corrupted = Object.assign(new TokenStoreUpdateError("edit", "edit", "stdin"), {
       stage: "synthetic-stage", operation: "synthetic-operation", category: "synthetic-category",
     });
-    for (const input of [forged, corrupted, "synthetic-raw-exception", null]) {
+    for (const input of [forged, corrupted, "synthetic-raw-exception", null,
+      ...hostileDiagnostics.map(({ wrap }) => wrap(new TokenStoreUpdateError())),
+    ]) {
       const error = sanitizeTokenStoreUpdateError(input);
       expect(error.message).toBe("freee OAuth token store could not be updated");
       expect(JSON.stringify(error)).toBe("{}");
       expect(error).not.toHaveProperty("cause");
+      expect(`${String(error)} ${JSON.stringify(error)} ${error.stack}`).not.toContain("synthetic-");
+    }
+  });
+
+  it.each(hostileDiagnostics)("closes $name to a secret-free fixed error after refresh and login", async ({ wrap }) => {
+    const store = {
+      load: async () => ({ accessToken: "expired", refreshToken: "old", expiresAt: 1 }),
+      save: async () => { throw wrap(new TokenStoreUpdateError()); },
+    };
+    const outcomes = [
+      () => loadApiAuth({
+        tokenStore: store, profile: "alpha", now: () => 1_000_000,
+        env: { FREEE_CLIENT_ID: "client", FREEE_CLIENT_SECRET: "secret" },
+        fetchFn: async () => new Response(JSON.stringify({ access_token: "fresh", refresh_token: "rotated", expires_in: 21600 }), { status: 200 }),
+      }),
+      () => persistInitialOAuthTokens(store, "alpha", { accessToken: "fresh", refreshToken: "rotated", expiresIn: 21600 }),
+    ];
+    for (const outcome of outcomes) {
+      const error = await outcome().catch((error: unknown) => error) as Error;
+      expect(error.message).toBe("freee OAuth token store could not be updated");
+      expect(JSON.stringify(error)).toBe("{}");
+      expect(error).not.toHaveProperty("cause");
+      expect(`${String(error)} ${JSON.stringify(error)} ${error.stack}`).not.toContain("synthetic-");
+    }
+  });
+
+  it("retains only own enum data properties without invoking getters or proxy get traps", () => {
+    const getters = {
+      stage: vi.fn(() => "edit"), operation: vi.fn(() => "edit"), category: vi.fn(() => "stdin"),
+    };
+    const accessorError = new TokenStoreUpdateError();
+    for (const key of ["stage", "operation", "category"] as const) {
+      Object.defineProperty(accessorError, key, { get: getters[key] });
+    }
+    const inheritedError = Object.create(new TokenStoreUpdateError("edit", "edit", "stdin"));
+    for (const input of [accessorError, inheritedError]) {
+      const error = sanitizeTokenStoreUpdateError(input);
+      expect(error.message).toBe("freee OAuth token store could not be updated");
+      expect(JSON.stringify(error)).toBe("{}");
+    }
+    for (const getter of Object.values(getters)) expect(getter).not.toHaveBeenCalled();
+
+    const input = new Proxy(new TokenStoreUpdateError("edit", "edit", "stdin"), {
+      get() { throw new Error("synthetic-secret"); },
+    });
+    const error = sanitizeTokenStoreUpdateError(input);
+    expect(error).toMatchObject({ message: "freee OAuth token store could not be updated", stage: "edit", operation: "edit", category: "stdin" });
+    expect(`${String(error)} ${JSON.stringify(error)} ${error.stack}`).not.toContain("synthetic-");
+  });
+
+  it.each(["preread", "edit", "readback"] as const)("closes hostile op diagnostics during %s without exposing secrets", async (stage) => {
+    const inputs = [
+      ...hostileDiagnostics.filter(({ name }) => !name.includes("stage getter") && !name.includes("operation getter")),
+      { name: "enum category getter", wrap: (error: Error) => Object.defineProperty(error, "category", { get: () => "spawn" }) },
+      { name: "non-enum category", wrap: (error: Error) => Object.assign(error, { category: "synthetic-secret" }) },
+    ];
+    for (const { wrap } of inputs) {
+      // Obtain the actual private OpCommandError through the public runner.
+      const original = await runOp([], undefined, {
+        spawnFn: () => { throw new Error("synthetic-secret"); },
+      }).catch((error: unknown) => error) as Error;
+      const input = wrap(original);
+      const bundle = { accessToken: "access", refreshToken: "refresh", expiresAt: 1 };
+      const stdout = JSON.stringify({ fields: [
+        { label: "access_token", value: "access" }, { label: "refresh_token", value: "refresh" }, { label: "expires_at", value: "1" },
+      ] });
+      let calls = 0;
+      const failAt = { preread: 1, edit: 2, readback: 3 }[stage];
+      const store = new OnePasswordTokenStore({
+        resolveItem: () => "synthetic-item", resolveVault: () => undefined,
+        run: async () => {
+          if (++calls === failAt) throw input;
+          return { stdout };
+        },
+      });
+      const error = await store.save("alpha", bundle).catch((error: unknown) => error) as Error;
+      expect(error).toMatchObject({ message: "freee OAuth token store could not be updated", stage, operation: stage === "edit" ? "edit" : "get" });
+      expect((error as TokenStoreUpdateError).category).toBeUndefined();
+      expect(error).not.toHaveProperty("cause");
+      expect(`${String(error)} ${JSON.stringify(error)} ${error.stack}`).not.toContain("synthetic-");
+      expect(calls).toBe(failAt);
     }
   });
 
