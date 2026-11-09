@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { OnePasswordTokenStore, type OAuthTokenBundle } from "./one-password-token-store.js";
+import { sanitizeTokenStoreUpdateError, OnePasswordTokenStore, type OAuthTokenBundle } from "./one-password-token-store.js";
 
 interface FreeeTokenFile {
   access_token: string;
@@ -144,8 +144,8 @@ async function loadOnePasswordApiAuth(deps: LoaderDeps, env: NodeJS.ProcessEnv):
   // Awaiting save before return is deliberate: freee refresh tokens are single-use.
   try {
     await store.save(profile, refreshed);
-  } catch {
-    throw new Error("freee OAuth token store could not be updated");
+  } catch (error) {
+    throw sanitizeTokenStoreUpdateError(error);
   }
   return { mode: "onepassword", accessToken: refreshed.accessToken };
 }

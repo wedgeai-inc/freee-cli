@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLoginExecutor, persistInitialOAuthTokens } from "../../src/commands/auth/oauth-login.js";
 
+import { TokenStoreUpdateError } from "../../src/lib/one-password-token-store.js";
+
 describe("OAuth login token persistence", () => {
+  it.each(["preread", "edit", "readback", "mismatch"] as const)("preserves %s diagnostics without success notification or secret output", async (stage) => {
+    const original = Object.assign(new TokenStoreUpdateError(stage, stage === "mismatch" ? undefined : stage === "edit" ? "edit" : "get", stage === "mismatch" ? undefined : "stdin"), {
+      message: "synthetic-raw-error", cause: new Error("synthetic-cause"), stdout: "synthetic-output", item: "synthetic-item", vault: "synthetic-vault",
+    });
+    const onStarted = vi.fn();
+    const executor = createLoginExecutor({ save: async () => { throw original; } }, "alpha");
+    const error = await executor("synthetic-access", "synthetic-refresh", 21600, undefined, onStarted).catch((error: unknown) => error);
+    expect(error).toMatchObject({ message: "freee OAuth token store could not be updated", stage, operation: original.operation, category: original.category });
+    expect(error).not.toBe(original);
+    expect(error).not.toHaveProperty("cause");
+    expect(`${String(error)} ${JSON.stringify(error)} ${(error as Error).stack}`).not.toContain("synthetic-");
+    expect(onStarted).not.toHaveBeenCalled();
+  });
+
   it("stores the initial access and refresh token bundle before completing login", async () => {
     const save = vi.fn(async () => undefined);
     await persistInitialOAuthTokens({ save }, "alpha", { accessToken: "access", refreshToken: "refresh", expiresIn: 21600 }, () => 1_000_000);

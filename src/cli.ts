@@ -6,7 +6,7 @@ import { runQuotationsNextNumber } from "./commands/quotations/next-number.js";
 import { validateNumberPrefix } from "./lib/next-number.js";
 import { isMainModule } from "./lib/main-module.js";
 import { loadApiAuth } from "./lib/token-config-loader.js";
-import { OnePasswordTokenStore } from "./lib/one-password-token-store.js";
+import { OnePasswordTokenStore, TokenStoreUpdateError, sanitizeTokenStoreUpdateError } from "./lib/one-password-token-store.js";
 import { runOAuthLogin } from "./commands/auth/oauth-login.js";
 import { runExpenseList, formatExpenseList } from "./commands/expense/list.js";
 import { createReadOnlyClient } from "./lib/clients/read-only-client.js";
@@ -623,10 +623,18 @@ export function createProgram(): Command {
   return program;
 }
 
+export function reportCliError(error: unknown): void {
+  const diagnostic = error instanceof TokenStoreUpdateError ? sanitizeTokenStoreUpdateError(error) : undefined;
+  const message = diagnostic?.message ?? (error instanceof Error ? error.message : String(error));
+  console.error(`Error: ${message}`);
+  if (diagnostic) {
+    const fields = ["stage", "operation", "category"] as const;
+    const details = fields.flatMap(key => diagnostic[key] === undefined ? [] : [`${key}=${diagnostic[key]}`]);
+    if (details.length) console.error(`Token store diagnostics: ${details.join(" ")}`);
+  }
+  process.exitCode = 1;
+}
+
 if (isMainModule(import.meta.url, process.argv[1])) {
-  createProgram().parseAsync(process.argv).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Error: ${message}`);
-    process.exitCode = 1;
-  });
+  createProgram().parseAsync(process.argv).catch(reportCliError);
 }
