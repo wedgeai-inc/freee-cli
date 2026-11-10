@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, unlink } from "node:fs/promises";
+import { link, mkdir, open, readFile, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+const UNPARSEABLE_LOCK_MAX_AGE_MS = 60_000;
 
 export interface TokenRefreshLockOptions {
   /** Defaults to ~/.cache/freee-cli. Tests must inject a temporary directory. */
@@ -34,37 +36,60 @@ export async function withTokenRefreshLock<T>(
 
   await mkdir(lockDir, { recursive: true, mode: 0o700 });
   if (!(await tryCreate(lockPath, content))) {
-    const holder = await readHolderPid(lockPath);
-    if (holder === undefined || isAlive(holder)) throw lockHeldError(lockPath);
-    await unlink(lockPath).catch(() => undefined);
-    if (!(await tryCreate(lockPath, content))) throw lockHeldError(lockPath);
+    const stale = await readFile(lockPath, "utf8").catch(() => undefined);
+    const holder = readHolderPid(stale);
+    if (stale === undefined || (holder !== undefined && isAlive(holder))) throw lockHeldError(lockPath);
+    const reclaimPath = `${lockPath}.reclaim`;
+    if (!(await tryCreate(reclaimPath, content))) throw lockHeldError(lockPath);
+    try {
+      const current = await readFile(lockPath, "utf8").catch(() => undefined);
+      if (current !== stale) throw lockHeldError(lockPath);
+      if (holder === undefined) {
+        const info = await stat(lockPath).catch(() => undefined);
+        if (!info || Date.now() - info.mtimeMs <= UNPARSEABLE_LOCK_MAX_AGE_MS) throw lockHeldError(lockPath);
+      }
+      await unlink(lockPath);
+      if (!(await tryCreate(lockPath, content))) throw lockHeldError(lockPath);
+    } finally {
+      await removeOwned(reclaimPath, content);
+    }
   }
   try {
     return await fn();
   } finally {
-    const current = await readFile(lockPath, "utf8").catch(() => undefined);
-    if (current === content) await unlink(lockPath).catch(() => undefined);
+    await removeOwned(lockPath, content);
   }
 }
 
 async function tryCreate(path: string, content: string): Promise<boolean> {
-  let handle;
+  // Publish a completed inode with link's no-overwrite semantics. A crash while
+  // writing the temporary file must never leave an empty visible lock.
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "wx", 0o600);
   try {
-    handle = await open(path, "wx", 0o600);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    throw error;
-  }
-  try {
-    await handle.writeFile(content);
+    try {
+      await handle.writeFile(content);
+    } finally {
+      await handle.close();
+    }
+    try {
+      await link(temporary, path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw error;
+    }
   } finally {
-    await handle.close();
+    await unlink(temporary);
   }
-  return true;
 }
 
-async function readHolderPid(path: string): Promise<number | undefined> {
-  const text = await readFile(path, "utf8").catch(() => undefined);
+async function removeOwned(path: string, content: string): Promise<void> {
+  const current = await readFile(path, "utf8").catch(() => undefined);
+  if (current === content) await unlink(path).catch(() => undefined);
+}
+
+function readHolderPid(text: string | undefined): number | undefined {
   const token = text?.split(/\s/)[0] ?? "";
   if (!/^[1-9][0-9]*$/.test(token)) return undefined;
   const pid = Number(token);

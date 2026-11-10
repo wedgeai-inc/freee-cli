@@ -634,6 +634,8 @@ profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFIL
 
 **同じ profile の refresh は同時に 1 つだけ動く。** refresh の間は `~/.cache/freee-cli/<profile>.lock` を作り、既にあれば待たずにエラーで終了する。lock には実行中のプロセスの PID を書き、その PID が既に終了していれば古い lock として 1 回だけ取り直す（PID が別のプロセスに再利用されていると、終了済みと判定できない）。異常終了などで lock が残ったときは、refresh が動いていないことを確かめてから `rm ~/.cache/freee-cli/<profile>.lock` で消す。実行中に消すと、同じ refresh token で並行して refresh が起き、token を失うことがある。
 
+取り直しは`<profile>.lock.reclaim`で排他し、PIDを解析できないlockは更新から60秒を超えた場合だけ回収する。異常終了で`.lock.reclaim`が残った場合も、refreshが動いていないことを確かめてから削除する。実行中の削除は並行refreshを起こしうる。
+
 ### `op run --env-file`で認証する
 
 次のenvファイル例はすべて架空の参照・ID・vault名です。credentialの値は書かず、`FREEE_CLIENT_ID`と`FREEE_CLIENT_SECRET`は`op://`参照にします。`op run`が実行時に値へ解決して子プロセスに渡します。
