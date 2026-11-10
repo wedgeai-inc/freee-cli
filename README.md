@@ -64,6 +64,7 @@ freee アプリストアでアプリを作成し、コールバック URL に `h
 | コマンド | 種別 |
 |---|---|
 | `auth login` | 1Password に token を保存する初回認可 |
+| `auth refresh` | 1Password の token を期限にかかわらず更新して保存（refresh token を回転） |
 | `companies list` | 読み取り |
 | `walletables list` | 読み取り |
 | `wallet-txns list` | 読み取り（口座明細） |
@@ -666,6 +667,14 @@ freee expense list --company-id 1234567 --start-transaction-date 2026-09-01 --en
 profile ごとの item 参照は実行時に `FREEE_OAUTH_ITEM_REFERENCE_<PROFILE>` として注入する（`<PROFILE>` は大文字、`-` は `_`）。profile 名は `^[a-z0-9][a-z0-9-]*$`（小文字・数字・ハイフン）に限る。大文字や `_` を許すと環境変数名が衝突し、別 profile の rotation が互いの item を上書きしうるため。
 
 **1Password の service account で実行する場合は `FREEE_OAUTH_VAULT_<PROFILE>` に vault 名も注入する。** service account では `op item get` / `op item edit` に vault の指定が必須で、無いと `a vault query must be provided when this command is called by a service account` で失敗する。個人アカウント（Touch ID）では省略してよい。対象 item は事前に `access_token`、`refresh_token`、`expires_at` の各 field を持たせる。token・secret・認可コードをファイル、ログ、標準出力、argv に置かない。**item 参照は `op` の argv に渡す**（値そのものではなく、どの item かを指す名前であり credential ではない）。ソース・テスト・fixture には埋め込まず、実行時に注入する。`op item edit` への token bundle は標準入力だけで渡す。refresh が無効な場合は自動でブラウザを開かず、`freee auth login --profile <name>` を明示的に実行して再認可する。
+
+**1Password へ読み取り権限しかない環境では `FREEE_TOKEN_REFRESH=disabled` を設定する。** refresh token は single-use のため、書き込めない環境で refresh すると、保存に失敗した時点で refresh token を失う。`disabled` のときは期限切れ（または 60 秒以内に切れる）でも refresh せずエラーで終了し、期限内の token はそのまま使う。`freee auth refresh` も、期限にかかわらず「この環境では token の更新を禁止しています」と表示して終了する。未設定・空文字・`enabled` は従来どおり、それ以外の値は token が期限内でも refresh せずエラーにする。token の更新は 1Password に書き込める端末で `freee auth refresh --profile <name>` を実行する（期限にかかわらず refresh し、保存と読み戻し照合まで行う）。保存に失敗した場合は、新しい token が保存されていない可能性がある旨を表示して非ゼロで終了するので、`freee auth login --profile <name>` で再認可する。
+
+**refresh の前に、保存先へ書き込めるかを確かめる。** 自動 refresh と `freee auth refresh` は、いまの token bundle をそのまま 1Password へ書き戻して読み戻し照合が通ってから refresh token を使う。書き戻せない場合は refresh token を使わずにエラーで終了する（ファイル保存の legacy 経路も、`tokens.json` を書き戻して読めることを確かめてから refresh する。ファイル経路の token は `freee auth refresh` では更新できない）。
+
+**同じ profile の refresh は同時に 1 つだけ動く。** refresh の間は `~/.cache/freee-cli/<profile>.lock` を作り、既にあれば待たずにエラーで終了する。lock には実行中のプロセスの PID を書き、その PID が既に終了していれば古い lock として 1 回だけ取り直す（PID が別のプロセスに再利用されていると、終了済みと判定できない）。異常終了などで lock が残ったときは、refresh が動いていないことを確かめてから `rm ~/.cache/freee-cli/<profile>.lock` で消す。実行中に消すと、同じ refresh token で並行して refresh が起き、token を失うことがある。
+
+取り直しは`<profile>.lock.reclaim`で排他し、PIDを解析できないlockは更新から60秒を超えた場合だけ回収する。異常終了で`.lock.reclaim`が残った場合も、refreshが動いていないことを確かめてから削除する。実行中の削除は並行refreshを起こしうる。
 
 ### `op run --env-file`で認証する
 

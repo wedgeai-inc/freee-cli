@@ -34,3 +34,4 @@ AI コーディングエージェント向けの作業規約です。CC は `CLA
 - `wallet-txns reconcile --execute`
 - `wallet-txns create-deal --execute`
 - `freee auth login`（ブラウザでの認可）
+- `freee auth refresh`（refresh token を回転する）
