@@ -101,6 +101,7 @@ export async function loadApiAuth(deps: LoaderDeps = {}): Promise<ReadonlyAuthRe
     };
   }
 
+  assertTokenRefreshEnabled(env);
   if (!tokens.refresh_token) {
     throw new Error("freee access token expired. Run freee MCP authentication again.");
   }
@@ -131,16 +132,8 @@ async function loadOnePasswordApiAuth(deps: LoaderDeps, env: NodeJS.ProcessEnv):
     return { mode: "onepassword", accessToken: tokens.accessToken };
   }
 
-  const credentials = resolveClientCredential(env, {});
-  let refreshed: OAuthTokenBundle;
-  try {
-    refreshed = await refreshOnePasswordToken(tokens, credentials, deps.fetchFn ?? fetch, now());
-  } catch (error) {
-    if (error instanceof InvalidRefreshError) {
-      throw new Error(`freee OAuth refresh is invalid. Run freee auth login --profile ${profile}.`);
-    }
-    throw error;
-  }
+  assertTokenRefreshEnabled(env, profile);
+  const refreshed = await refreshOnePasswordTokenForProfile(tokens, env, deps.fetchFn ?? fetch, now(), profile);
   // Awaiting save before return is deliberate: freee refresh tokens are single-use.
   try {
     await store.save(profile, refreshed);
@@ -148,6 +141,47 @@ async function loadOnePasswordApiAuth(deps: LoaderDeps, env: NodeJS.ProcessEnv):
     throw sanitizeTokenStoreUpdateError(error);
   }
   return { mode: "onepassword", accessToken: refreshed.accessToken };
+}
+
+/**
+ * FREEE_TOKEN_REFRESH: unset / "" / "enabled" keeps the default refresh behavior.
+ * "disabled" forbids refresh (for environments that cannot write the token store,
+ * where a refresh would consume the single-use refresh token without saving it).
+ * Any other value fails closed so a typo never triggers an unintended refresh.
+ */
+export function assertTokenRefreshEnabled(env: NodeJS.ProcessEnv, profile?: string): void {
+  const value = env.FREEE_TOKEN_REFRESH;
+  if (value === undefined || value === "" || value === "enabled") return;
+  if (value === "disabled") {
+    const command = profile === undefined ? "freee auth refresh" : `freee auth refresh --profile ${profile}`;
+    throw new Error(
+      "freeeのaccess tokenの期限が切れています（または60秒以内に切れます）。" +
+      "FREEE_TOKEN_REFRESH=disabledのため、この環境ではtokenを更新しません。" +
+      `tokenを保存できる端末で \`${command}\` を実行してから、もう一度実行してください。`,
+    );
+  }
+  throw new Error(
+    "FREEE_TOKEN_REFRESHの値が不正です。未設定・enabled・disabledのいずれかを指定してください。tokenは更新しません。",
+  );
+}
+
+/** Refresh a 1Password-held bundle; an invalid refresh token maps to re-login guidance. Does not save. */
+export async function refreshOnePasswordTokenForProfile(
+  tokens: OAuthTokenBundle,
+  env: NodeJS.ProcessEnv,
+  fetchFn: typeof fetch,
+  nowMs: number,
+  profile: string,
+): Promise<OAuthTokenBundle> {
+  const credentials = resolveClientCredential(env, {});
+  try {
+    return await refreshOnePasswordToken(tokens, credentials, fetchFn, nowMs);
+  } catch (error) {
+    if (error instanceof InvalidRefreshError) {
+      throw new Error(`freee OAuth refresh is invalid. Run freee auth login --profile ${profile}.`);
+    }
+    throw error;
+  }
 }
 
 class InvalidRefreshError extends Error {}

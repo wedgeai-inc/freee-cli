@@ -8,6 +8,7 @@ import { isMainModule } from "./lib/main-module.js";
 import { loadApiAuth } from "./lib/token-config-loader.js";
 import { OnePasswordTokenStore, TokenStoreUpdateError, sanitizeTokenStoreUpdateError } from "./lib/one-password-token-store.js";
 import { runOAuthLogin } from "./commands/auth/oauth-login.js";
+import { runOAuthRefresh, RefreshedTokenNotSavedError } from "./commands/auth/oauth-refresh.js";
 import { runExpenseList, formatExpenseList } from "./commands/expense/list.js";
 import { createReadOnlyClient } from "./lib/clients/read-only-client.js";
 import { PublicFreeeClient } from "./lib/clients/freee-public-client.js";
@@ -80,6 +81,14 @@ export function createProgram(): Command {
       if (!clientId || !clientSecret) throw new Error("freee client credential environment is incomplete.");
       const profile = opts.profile ?? program.opts<{ profile?: string }>().profile ?? process.env.FREEE_OAUTH_PROFILE ?? "default";
       runOAuthLogin({ profile, clientId, clientSecret, store: new OnePasswordTokenStore() });
+    });
+  auth
+    .command("refresh")
+    .description("refresh the stored OAuth token bundle now and save it to 1Password (rotates the refresh token)")
+    .option("--profile <name>", "OAuth profile")
+    .action(async (opts) => {
+      const profile = opts.profile ?? program.opts<{ profile?: string }>().profile ?? process.env.FREEE_OAUTH_PROFILE ?? "default";
+      console.log(await runOAuthRefresh({ profile, env: process.env, store: new OnePasswordTokenStore() }));
     });
 
   const expense = program.command("expense").description("expense operations");
@@ -624,8 +633,12 @@ export function createProgram(): Command {
 }
 
 export function reportCliError(error: unknown): void {
-  const diagnostic = error instanceof TokenStoreUpdateError ? sanitizeTokenStoreUpdateError(error) : undefined;
-  const message = diagnostic?.message ?? (error instanceof Error ? error.message : String(error));
+  const diagnostic = error instanceof TokenStoreUpdateError
+    ? sanitizeTokenStoreUpdateError(error)
+    : error instanceof RefreshedTokenNotSavedError ? sanitizeTokenStoreUpdateError(error.diagnostic) : undefined;
+  const message = error instanceof RefreshedTokenNotSavedError
+    ? error.message
+    : diagnostic?.message ?? (error instanceof Error ? error.message : String(error));
   console.error(`Error: ${message}`);
   if (diagnostic) {
     const fields = ["stage", "operation", "category"] as const;
