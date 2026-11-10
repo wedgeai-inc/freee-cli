@@ -47,13 +47,19 @@ describe("OnePasswordTokenStore", () => {
   });
 
   it.each(hostileDiagnostics)("closes $name to a secret-free fixed error after refresh and login", async ({ wrap }) => {
+    let refreshSaves = 0;
     const store = {
       load: async () => ({ accessToken: "expired", refreshToken: "old", expiresAt: 1 }),
       save: async () => { throw wrap(new TokenStoreUpdateError()); },
     };
+    // For the refresh outcome, let the pre-refresh write check pass so the rotated save fails.
+    const refreshStore = {
+      load: store.load,
+      save: async () => { if (refreshSaves++ === 0) return; throw wrap(new TokenStoreUpdateError()); },
+    };
     const outcomes = [
       () => loadApiAuth({
-        tokenStore: store, profile: "alpha", now: () => 1_000_000,
+        tokenStore: refreshStore, profile: "alpha", now: () => 1_000_000,
         env: { FREEE_CLIENT_ID: "client", FREEE_CLIENT_SECRET: "secret" },
         fetchFn: async () => new Response(JSON.stringify({ access_token: "fresh", refresh_token: "rotated", expires_in: 21600 }), { status: 200 }),
       }),
@@ -846,7 +852,8 @@ describe("OnePasswordTokenStore", () => {
     }).catch((cause: unknown) => cause);
     // 再認可を促すだけで、勝手にブラウザを開かない
     expect((error as Error).message).toContain("freee auth login");
-    expect(store.save).not.toHaveBeenCalled();
+    // only the pre-refresh write check of the current bundle
+    expect(store.save).toHaveBeenCalledTimes(1);
 
     // ESM では spawn を spy できないため、refresh 経路のモジュールが
     // プロセス起動やブラウザ起動の手段を持たないことを静的に固定する。
@@ -979,7 +986,8 @@ describe("1Password-backed API auth", () => {
     const result = await loadApiAuth({ tokenStore: store, env: { FREEE_CLIENT_ID: "client", FREEE_CLIENT_SECRET: "secret" }, now: () => 1_000_000, fetchFn });
     expect(result.accessToken).toBe(remaining === 60_000 ? "fresh" : "access");
     expect(fetchFn).toHaveBeenCalledTimes(remaining === 60_000 ? 1 : 0);
-    expect(store.save).toHaveBeenCalledTimes(remaining === 60_000 ? 1 : 0);
+    // pre-refresh write check + rotated bundle
+    expect(store.save).toHaveBeenCalledTimes(remaining === 60_000 ? 2 : 0);
   });
 
   it("does not create, load, or save a OnePassword store when FREEE_ACCESS_TOKEN is nonempty", async () => {
@@ -998,7 +1006,7 @@ describe("1Password-backed API auth", () => {
     });
     const error = await loadApiAuth({
       env: { FREEE_CLIENT_ID: "synthetic-client", FREEE_CLIENT_SECRET: "synthetic-secret" },
-      tokenStore: { load: async () => ({ accessToken: "expired", refreshToken: "old", expiresAt: 1 }), save: async () => { throw original; } },
+      tokenStore: { load: async () => ({ accessToken: "expired", refreshToken: "old", expiresAt: 1 }), save: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(original) },
       now: () => 1_000_000,
       fetchFn: async () => new Response(JSON.stringify({ access_token: "synthetic-access", refresh_token: "synthetic-refresh", expires_in: 21600 })),
     }).catch((error: unknown) => error);
@@ -1047,7 +1055,7 @@ describe("1Password-backed API auth", () => {
   });
 
   it("fails closed when persistence fails and never returns the fresh access token", async () => {
-    const store = { load: vi.fn(async () => ({ accessToken: "expired", refreshToken: "old-refresh", expiresAt: 1 })), save: vi.fn(async () => { throw new Error("new-refresh"); }) };
+    const store = { load: vi.fn(async () => ({ accessToken: "expired", refreshToken: "old-refresh", expiresAt: 1 })), save: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new Error("new-refresh")) };
     const error = await loadApiAuth({
       tokenStore: store,
       profile: "alpha",
@@ -1070,7 +1078,9 @@ describe("1Password-backed API auth", () => {
       fetchFn: async () => new Response("invalid_grant", { status: 400 }),
     }).catch((cause: unknown) => cause);
     expect((error as Error).message).toBe("freee OAuth refresh is invalid. Run freee auth login --profile alpha.");
-    expect(store.save).not.toHaveBeenCalled();
+    // only the pre-refresh write check of the current bundle; no rotated bundle is saved
+    expect(store.save).toHaveBeenCalledTimes(1);
+    expect(store.save).toHaveBeenCalledWith("alpha", { accessToken: "expired", refreshToken: "old-refresh", expiresAt: 1 });
   });
 
   it.each([
@@ -1086,6 +1096,8 @@ describe("1Password-backed API auth", () => {
       now: () => 1_000_000,
       fetchFn: async () => new Response(JSON.stringify(response), { status: 200 }),
     })).rejects.toThrow("freee token refresh returned an invalid response");
-    expect(store.save).not.toHaveBeenCalled();
+    // only the pre-refresh write check of the current bundle; no rotated bundle is saved
+    expect(store.save).toHaveBeenCalledTimes(1);
+    expect(store.save).toHaveBeenCalledWith("alpha", { accessToken: "expired", refreshToken: "old-refresh", expiresAt: 1 });
   });
 });

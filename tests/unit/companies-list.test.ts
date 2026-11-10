@@ -72,7 +72,8 @@ describe("companies list authentication failure", () => {
     vi.stubEnv("FREEE_CLIENT_ID", "synthetic-client");
     vi.stubEnv("FREEE_CLIENT_SECRET", "synthetic-secret");
     vi.spyOn(OnePasswordTokenStore.prototype, "load").mockResolvedValue({ accessToken: "expired", refreshToken: "old", expiresAt: 1 });
-    vi.spyOn(OnePasswordTokenStore.prototype, "save").mockRejectedValue(new TokenStoreUpdateError("preread", "get", "nonzero"));
+    // The first save is the pre-refresh write check; the second (rotated bundle) fails.
+    vi.spyOn(OnePasswordTokenStore.prototype, "save").mockResolvedValueOnce(undefined).mockRejectedValue(new TokenStoreUpdateError("preread", "get", "nonzero"));
     try {
       const error = await createProgram().parseAsync(["companies", "list", "--format", "table"], { from: "user" }).catch((error: unknown) => error);
       expect(error).toMatchObject({ message: "freee OAuth token store could not be updated", stage: "preread", operation: "get", category: "nonzero" });

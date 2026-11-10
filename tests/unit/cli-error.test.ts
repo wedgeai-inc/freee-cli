@@ -29,7 +29,8 @@ it("prints only the user message and enum diagnostics to stderr when refreshed t
   vi.spyOn(OnePasswordTokenStore.prototype, "load").mockResolvedValue({
     accessToken: "synthetic-expired", refreshToken: "synthetic-old-refresh", expiresAt: 1,
   });
-  vi.spyOn(OnePasswordTokenStore.prototype, "save").mockRejectedValue(Object.assign(
+  // The first save is the pre-refresh write check; the second (rotated bundle) fails.
+  vi.spyOn(OnePasswordTokenStore.prototype, "save").mockResolvedValueOnce(undefined).mockRejectedValue(Object.assign(
     new TokenStoreUpdateError("edit", "edit", "nonzero"),
     { message: "synthetic-raw-error", cause: new Error("synthetic-cause"),
       token: "synthetic-token", item: "synthetic-item", vault: "synthetic-vault", stdout: "synthetic-op-output" },

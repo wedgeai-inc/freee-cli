@@ -5,7 +5,7 @@ import { runInvoicesNextNumber } from "./commands/invoices/next-number.js";
 import { runQuotationsNextNumber } from "./commands/quotations/next-number.js";
 import { validateNumberPrefix } from "./lib/next-number.js";
 import { isMainModule } from "./lib/main-module.js";
-import { loadApiAuth } from "./lib/token-config-loader.js";
+import { loadApiAuth, TokenStoreNotWritableError } from "./lib/token-config-loader.js";
 import { OnePasswordTokenStore, TokenStoreUpdateError, sanitizeTokenStoreUpdateError } from "./lib/one-password-token-store.js";
 import { runOAuthLogin } from "./commands/auth/oauth-login.js";
 import { runOAuthRefresh, RefreshedTokenNotSavedError } from "./commands/auth/oauth-refresh.js";
@@ -61,7 +61,15 @@ function parsePartnerId(raw: string): number {
 
 export function createProgram(): Command {
   const program = new Command();
-  program.name("freee").description("Unofficial CLI for the freee public API").option("--profile <name>", "OAuth profile");
+  program
+    .name("freee")
+    .description(
+      "Unofficial CLI for the freee public API\n\n" +
+      "Environment:\n" +
+      "  FREEE_TOKEN_REFRESH  unset/enabled: refresh expired OAuth tokens automatically;\n" +
+      "                       disabled: never refresh (for read-only token stores); any other value is an error",
+    )
+    .option("--profile <name>", "OAuth profile");
   const loadPublicApiAuth = () => loadApiAuth({ profile: program.opts<{ profile?: string }>().profile });
 
   registerAccountingCommands(
@@ -84,7 +92,11 @@ export function createProgram(): Command {
     });
   auth
     .command("refresh")
-    .description("refresh the stored OAuth token bundle now and save it to 1Password (rotates the refresh token)")
+    .description(
+      "refresh the stored OAuth token bundle now and save it to 1Password (rotates the refresh token). " +
+      "Checks that 1Password is writable first and holds a per-profile lock (~/.cache/freee-cli/<profile>.lock). " +
+      "Refused when FREEE_TOKEN_REFRESH=disabled",
+    )
     .option("--profile <name>", "OAuth profile")
     .action(async (opts) => {
       const profile = opts.profile ?? program.opts<{ profile?: string }>().profile ?? process.env.FREEE_OAUTH_PROFILE ?? "default";
@@ -635,8 +647,9 @@ export function createProgram(): Command {
 export function reportCliError(error: unknown): void {
   const diagnostic = error instanceof TokenStoreUpdateError
     ? sanitizeTokenStoreUpdateError(error)
-    : error instanceof RefreshedTokenNotSavedError ? sanitizeTokenStoreUpdateError(error.diagnostic) : undefined;
-  const message = error instanceof RefreshedTokenNotSavedError
+    : error instanceof RefreshedTokenNotSavedError || error instanceof TokenStoreNotWritableError
+      ? sanitizeTokenStoreUpdateError(error.diagnostic) : undefined;
+  const message = error instanceof RefreshedTokenNotSavedError || error instanceof TokenStoreNotWritableError
     ? error.message
     : diagnostic?.message ?? (error instanceof Error ? error.message : String(error));
   console.error(`Error: ${message}`);
