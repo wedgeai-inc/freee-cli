@@ -1,12 +1,12 @@
 import { secureAppend } from "./secure-append.js";
 import { join } from "node:path";
-import { isSensitivePiiKey } from "./redactor.js";
+import { isAccountNumberKey, isMaskedAccountNumber, isSensitivePiiKey } from "./redactor.js";
 export interface PartnerAuditEntry { timestamp: string; task_id: string; event: "partner_create"; mode: "dry-run" | "execute"; status: "planned" | "created" | "failed"; company_id: number; payload_redacted: unknown; created_id?: number; ignored?: string[]; reason?: string; post_state?: "not_attempted" | "rejected" | "unknown" | "succeeded"; }
 export interface PartnerUpdateAuditEntry { timestamp: string; task_id: string; event: "partner_update"; mode: "dry-run" | "execute"; status: "planned" | "updated" | "failed"; company_id: number; partner_id: number; payload_redacted: unknown; ignored?: string[]; reason?: string; put_state: "not_attempted" | "rejected" | "unknown" | "succeeded"; }
 function safe(value: unknown): boolean {
   if (typeof value === "string") return !/bearer\s+\S+/i.test(value) && !/[^\s@,;]+@[^\s@,;]+/.test(value);
   if (Array.isArray(value)) return value.every(safe);
-  return !value || typeof value !== "object" || Object.entries(value as Record<string, unknown>).every(([key, child]) => (!isSensitivePiiKey(key) || child === "[REDACTED]" || child == null) && safe(child));
+  return !value || typeof value !== "object" || Object.entries(value as Record<string, unknown>).every(([key, child]) => (!isAccountNumberKey(key) || isMaskedAccountNumber(child)) && (!isSensitivePiiKey(key) || child === "[REDACTED]" || child == null) && safe(child));
 }
 export async function appendPartnerAudit(logDir: string, entry: PartnerAuditEntry): Promise<void> {
   if (!safe(entry)) throw new Error("PartnerAuditEntry: redact leak");

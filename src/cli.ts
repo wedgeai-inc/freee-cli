@@ -425,15 +425,28 @@ export function createProgram(): Command {
     .requiredOption("--id <id>", "partner ID")
     .requiredOption("--plan <path>", "plan JSON path (PUT /api/1/partners/{id} body without company_id)")
     .option("--expect-name <name>", "expected current partner name (required with --execute)")
+    .option("--expect-account-last4 <digits>", "last 4 digits of partner_bank_account_attributes.account_number in the plan (required with --execute when the plan changes the bank account; checked before authentication)")
+    .option("--allow-replace-bank-account", "allow overwriting a bank account that is already registered (default: stop before PUT)")
     .option("--execute", "execute real PUT (default: dry-run)")
     .option("--log-dir <path>", "audit log output directory", "./audit-logs")
     .option("--task-id <id>", "task ID for audit log", "freee-partner-update")
+    .addHelpText("after", [
+      "",
+      "Bank account (partner_bank_account_attributes, update only; partners create still rejects it):",
+      "  keys: bank_name, bank_name_kana, bank_code, branch_name, branch_kana, branch_code,",
+      "        account_type, account_number, long_account_name, account_name (others are rejected)",
+      "  bank_code: 4 digits, branch_code: 3 digits, account_number: 7 digits (required)",
+      "  account_type: ordinary | checking | earmarked | savings | other",
+      "  output and audit logs show account_number masked except the last 4 digits (e.g. ***4567)",
+      "  --execute requires --expect-account-last4; replacing a registered account also needs --allow-replace-bank-account",
+      "  after PUT, every bank field in the plan is read back and a mismatch exits with code 1",
+    ].join("\n"))
     .action(async (opts) => {
       const logDir: string = opts.logDir;
       const companyId = parseCompanyId(opts.companyId);
       const id = parsePartnerId(opts.id);
       const result = await runPartnersUpdate(
-        { companyId, id, planPath: opts.plan, execute: Boolean(opts.execute), logDir, taskId: opts.taskId, expectName: opts.expectName },
+        { companyId, id, planPath: opts.plan, execute: Boolean(opts.execute), logDir, taskId: opts.taskId, expectName: opts.expectName, expectAccountLast4: opts.expectAccountLast4, allowReplaceBankAccount: opts.allowReplaceBankAccount === true ? true : undefined },
         { getClient: async () => { const auth = await loadPublicApiAuth(); return new PublicFreeeClient({ baseUrl: "https://api.freee.co.jp", token: auth.accessToken }); }, readFile: (p) => fsReadFile(p, "utf8"), appendAudit: (entry) => appendPartnerUpdateAudit(logDir, entry), now: () => new Date() },
       );
       console.log(formatPartnerUpdate(result));

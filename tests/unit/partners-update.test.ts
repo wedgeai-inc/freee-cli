@@ -162,3 +162,114 @@ describe("partners update", () => {
     }
   });
 });
+
+describe("partners update: bank account", () => {
+  const account = {
+    bank_name: "サンプル銀行", bank_name_kana: "サンプルギンコウ", bank_code: "0001",
+    branch_name: "テスト支店", branch_kana: "テストシテン", branch_code: "101",
+    account_type: "ordinary", account_number: "1234567",
+    long_account_name: "カブシキガイシャサンプル", account_name: "カブシキガイシャサンプル",
+  };
+  const existing = { ...account, bank_code: "0002", account_number: "7654321", account_name: "カンタロウ" };
+  const bankDeps = (fetchFn = vi.fn()) => { const d = deps(fetchFn); d.readFile.mockResolvedValue(JSON.stringify({ partner_bank_account_attributes: account })); return d; };
+  const execute = { ...options, execute: true, expectName: "現在名", expectAccountLast4: "4567" };
+  const fullNumbers = /1234567|7654321/;
+
+  it("dry-run by default: GETs once, never PUTs, shows masked current and next accounts side by side", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(response(partner({ partner_bank_account_attributes: existing })));
+    const d = bankDeps(fetchFn);
+    const result = await runPartnersUpdate(options, d);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(result.mode).toBe("dry-run");
+    expect(result.bankAccount).toEqual({ registered: true, current: { ...existing, account_number: "***4321" }, next: { ...account, account_number: "***4567" } });
+    expect(result.changes).toContainEqual({ path: "partner_bank_account_attributes.account_number", current: "***4321", next: "***4567", same: false });
+    expect(JSON.stringify(result)).not.toMatch(fullNumbers);
+    expect(JSON.stringify(d.appendAudit.mock.calls)).not.toMatch(fullNumbers);
+    expect(d.appendAudit).toHaveBeenCalledWith(expect.objectContaining({ status: "planned", payload_redacted: expect.objectContaining({ partner_bank_account_attributes: { ...account, account_number: "***4567" } }) }));
+  });
+
+  it("dry-run shows an unregistered current account as null and does not require the new flags", async () => {
+    const result = await runPartnersUpdate(options, bankDeps(vi.fn().mockResolvedValue(response(partner()))));
+    expect(result.bankAccount).toEqual({ registered: false, current: null, next: { ...account, account_number: "***4567" } });
+  });
+
+  it.each([
+    ["missing --expect-account-last4", { expectAccountLast4: undefined }, "mismatch:account_last4"],
+    ["different last four", { expectAccountLast4: "4566" }, "mismatch:account_last4"],
+    ["leading digits instead of last four", { expectAccountLast4: "1234" }, "mismatch:account_last4"],
+    ["non-four-digit value", { expectAccountLast4: "567" }, "invalid:expect_account_last4"],
+    ["non-digit value", { expectAccountLast4: "45a7" }, "invalid:expect_account_last4"],
+  ])("execute with %s stops before getClient", async (_case, extra, reason) => {
+    const d = bankDeps();
+    await expect(runPartnersUpdate({ ...execute, ...extra }, d)).rejects.toMatchObject({ name: PartnerUpdateGuardError.name, reason });
+    expect(d.getClient).not.toHaveBeenCalled();
+    expect(JSON.stringify(d.appendAudit.mock.calls)).not.toMatch(fullNumbers);
+  });
+
+  it("dry-run validates --expect-account-last4 when given", async () => {
+    const d = bankDeps();
+    await expect(runPartnersUpdate({ ...options, expectAccountLast4: "0000" }, d)).rejects.toMatchObject({ reason: "mismatch:account_last4" });
+    expect(d.getClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects --expect-account-last4 when the plan has no bank account", async () => {
+    const d = deps();
+    await expect(runPartnersUpdate({ ...options, expectAccountLast4: "4567" }, d)).rejects.toMatchObject({ reason: "unexpected:expect_account_last4" });
+    expect(d.getClient).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary updates working without the new flags", async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(response(partner())).mockResolvedValueOnce(response(partner())).mockResolvedValueOnce(response(partner({ shortcut1: "next" })));
+    const result = await runPartnersUpdate({ ...options, execute: true, expectName: "現在名" }, deps(fetchFn));
+    expect(result.updated).toEqual({ id: 100, name: "現在名", ignored: [] });
+    expect(result).not.toHaveProperty("bankAccount");
+  });
+
+  it("stops before PUT when an account is already registered and --allow-replace-bank-account is absent", async () => {
+    const fetchFn = vi.fn().mockResolvedValue(response(partner({ partner_bank_account_attributes: existing })));
+    const d = bankDeps(fetchFn);
+    await expect(runPartnersUpdate(execute, d)).rejects.toMatchObject({ name: PartnerUpdateGuardError.name, reason: "bank_account_already_registered" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(d.appendAudit.mock.calls)).not.toMatch(fullNumbers);
+  });
+
+  it.each([
+    ["missing key", partner()],
+    ["all nulls", partner({ partner_bank_account_attributes: Object.fromEntries(Object.keys(account).map((key) => [key, null])) })],
+    ["empty strings with default account_type", partner({ partner_bank_account_attributes: { ...Object.fromEntries(Object.keys(account).map((key) => [key, ""])), account_type: "ordinary" } })],
+  ])("treats %s as unregistered and adds the account without --allow-replace-bank-account", async (_case, initial) => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(response(initial)).mockResolvedValueOnce(response(partner())).mockResolvedValueOnce(response(partner({ partner_bank_account_attributes: account })));
+    const result = await runPartnersUpdate(execute, bankDeps(fetchFn));
+    expect(JSON.parse(fetchFn.mock.calls[1]![1].body)).toEqual({ company_id: 1, name: "現在名", partner_bank_account_attributes: account });
+    expect(result.updated).toEqual({ id: 100, name: "現在名", ignored: [], bankAccount: { verified: true, account: { ...account, account_number: "***4567" } } });
+  });
+
+  it("replaces a registered account with --allow-replace-bank-account, sending the full number but printing it masked", async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(response(partner({ partner_bank_account_attributes: existing }))).mockResolvedValueOnce(response(partner())).mockResolvedValueOnce(response(partner({ partner_bank_account_attributes: account })));
+    const d = bankDeps(fetchFn);
+    const result = await runPartnersUpdate({ ...execute, allowReplaceBankAccount: true }, d);
+    expect(JSON.parse(fetchFn.mock.calls[1]![1].body).partner_bank_account_attributes.account_number).toBe("1234567");
+    expect(result.updated?.bankAccount?.verified).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(fullNumbers);
+    expect(JSON.stringify(d.appendAudit.mock.calls)).not.toMatch(fullNumbers);
+    expect(d.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "updated", payload_redacted: expect.objectContaining({ partner_bank_account_attributes: expect.objectContaining({ account_number: "***4567", account_name: "カブシキガイシャサンプル", bank_name: "サンプル銀行", branch_name: "テスト支店" }) }) }));
+  });
+
+  it.each([
+    ["account_number", { ...account, account_number: "1234568" }],
+    ["account_type", { ...account, account_type: "checking" }],
+    ["account_name", { ...account, account_name: "サンプルカナ" }],
+    ["missing account", undefined],
+  ])("fails (not ignored) when the readback %s differs, without printing full numbers", async (field, after) => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(response(partner())).mockResolvedValueOnce(response(partner())).mockResolvedValueOnce(response(partner(after ? { partner_bank_account_attributes: after } : {})));
+    const d = bankDeps(fetchFn);
+    const error = await runPartnersUpdate(execute, d).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PartnerUpdateUnverifiedError);
+    expect(error).toMatchObject({ putState: "succeeded" });
+    expect((error as Error).message).toMatch(/bank_account_readback_mismatch/);
+    if (after) expect((error as Error).message).toContain(`partner_bank_account_attributes.${field}`);
+    expect((error as Error).message).not.toMatch(/1234567|1234568/);
+    expect(JSON.stringify(d.appendAudit.mock.calls)).not.toMatch(/1234567|1234568/);
+    expect(d.appendAudit).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed", put_state: "succeeded" }));
+  });
+});
