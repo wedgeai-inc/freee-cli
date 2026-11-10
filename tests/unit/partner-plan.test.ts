@@ -155,3 +155,60 @@ describe("partner plan specification conformance", () => {
     expect(keys).toEqual(Object.keys(provenance).sort());
   });
 });
+
+describe("partner update plan: partner_bank_account_attributes", () => {
+  const account = {
+    bank_name: "サンプル銀行", bank_name_kana: "サンプルギンコウ", bank_code: "0001",
+    branch_name: "テスト支店", branch_kana: "テストシテン", branch_code: "101",
+    account_type: "ordinary", account_number: "1234567",
+    long_account_name: "カブシキガイシャサンプル", account_name: "カブシキガイシャサンプル",
+  };
+
+  it("accepts all ten official child keys on update", () => {
+    expect(parsePartnerUpdatePlan({ partner_bank_account_attributes: account })).toEqual({ partner_bank_account_attributes: account });
+  });
+
+  it.each(["ordinary", "checking", "earmarked", "savings", "other"])("accepts account_type %s", (accountType) => {
+    expect(parsePartnerUpdatePlan({ partner_bank_account_attributes: { ...account, account_type: accountType } })).toMatchObject({ partner_bank_account_attributes: { account_type: accountType } });
+  });
+
+  it("accepts a partial account that includes account_number", () => {
+    expect(parsePartnerUpdatePlan({ partner_bank_account_attributes: { account_number: "1010101" } })).toEqual({ partner_bank_account_attributes: { account_number: "1010101" } });
+  });
+
+  it.each([
+    ["unknown child key", { ...account, swift: "X" }],
+    ["account_type earning", { ...account, account_type: "earning" }],
+    ["account_type typo", { ...account, account_type: "ordinal" }],
+    ["account_type empty", { ...account, account_type: "" }],
+    ["account_type null", { ...account, account_type: null }],
+    ["bank_code 3 digits", { ...account, bank_code: "001" }],
+    ["bank_code 5 digits", { ...account, bank_code: "00011" }],
+    ["bank_code letters", { ...account, bank_code: "00A1" }],
+    ["bank_code number", { ...account, bank_code: 1 }],
+    ["branch_code 2 digits", { ...account, branch_code: "10" }],
+    ["branch_code 4 digits", { ...account, branch_code: "1011" }],
+    ["branch_code full-width", { ...account, branch_code: "１０１" }],
+    ["account_number 6 digits", { ...account, account_number: "123456" }],
+    ["account_number 8 digits", { ...account, account_number: "12345678" }],
+    ["account_number hyphen", { ...account, account_number: "123-4567" }],
+    ["account_number trailing newline", { ...account, account_number: "1234567\n" }],
+    ["account_number numeric", { ...account, account_number: 1234567 }],
+    ["account_number missing", { bank_code: "0001" }],
+    ["empty account object", {}],
+    ["null account", null],
+    ["array account", []],
+    ["string account", "1234567"],
+    ["non-string bank_name", { ...account, bank_name: 1 }],
+  ])("rejects %s", (_case, value) => {
+    expect(() => parsePartnerUpdatePlan({ partner_bank_account_attributes: value })).toThrow(PartnerPlanError);
+  });
+
+  it("still rejects partner_bank_account_attributes on create", () => {
+    expect(() => parsePartnerPlan({ name: "取引先", partner_bank_account_attributes: account })).toThrow(/partner_bank_account_attributes must not be included/);
+  });
+
+  it("still rejects payer_walletable_id and transfer_fee_handling_side on update", () => {
+    for (const key of ["payer_walletable_id", "transfer_fee_handling_side"]) expect(() => parsePartnerUpdatePlan({ partner_bank_account_attributes: account, [key]: 1 })).toThrow(PartnerPlanError);
+  });
+});

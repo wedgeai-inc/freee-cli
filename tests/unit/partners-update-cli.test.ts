@@ -35,4 +35,25 @@ describe("partners update CLI entry", () => {
     expect(run).toHaveBeenCalledWith({ companyId: 1, id: 100, planPath: "plan.json", execute: true, logDir: "custom-audit", taskId: " exact-task ", expectName: " 現在名 " }, expect.any(Object));
     run.mockRestore();
   });
+
+  it("forwards --expect-account-last4 and --allow-replace-bank-account", async () => {
+    const run = vi.spyOn(partnerUpdate, "runPartnersUpdate").mockResolvedValue({ mode: "execute", companyId: 1, id: 100, current: { name: "現在名" }, changes: [], payload: {} });
+    await createProgram().parseAsync(["node", "freee", "partners", "update", "--company-id", "1", "--id", "100", "--plan", "plan.json", "--execute", "--expect-name", "現在名", "--expect-account-last4", "4567", "--allow-replace-bank-account"]);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ execute: true, expectName: "現在名", expectAccountLast4: "4567", allowReplaceBankAccount: true }), expect.any(Object));
+    run.mockRestore();
+  });
+
+  it("leaves --allow-replace-bank-account unset by default", async () => {
+    const run = vi.spyOn(partnerUpdate, "runPartnersUpdate").mockResolvedValue({ mode: "dry-run", companyId: 1, id: 100, current: { name: "現在名" }, changes: [], payload: {} });
+    await createProgram().parseAsync(["node", "freee", "partners", "update", "--company-id", "1", "--id", "100", "--plan", "plan.json"]);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ execute: false, allowReplaceBankAccount: undefined, expectAccountLast4: undefined }), expect.any(Object));
+    run.mockRestore();
+  });
+
+  it("documents the bank account flags in --help", () => {
+    const update = createProgram().commands.find((c) => c.name() === "partners")!.commands.find((c) => c.name() === "update")!;
+    const help = update.helpInformation();
+    expect(help).toContain("--expect-account-last4");
+    expect(help).toContain("--allow-replace-bank-account");
+  });
 });

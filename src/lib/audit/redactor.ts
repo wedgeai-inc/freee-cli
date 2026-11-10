@@ -60,6 +60,16 @@ function hashId(value: unknown): string {
   return "hash:" + createHash("sha256").update(String(value)).digest("hex").slice(0, 12);
 }
 
+/** 口座番号は下4桁だけを残す（7桁なら "***4567"）。4桁以下は全桁を伏せる */
+export function maskAccountNumber(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  const text = String(value);
+  return text.length > 4 ? `${"*".repeat(text.length - 4)}${text.slice(-4)}` : "*".repeat(text.length);
+}
+export const isAccountNumberKey = (key: string): boolean => /^account_number$/i.test(key);
+/** マスク済み（全桁伏せ、または下4桁以外伏せ）か */
+export const isMaskedAccountNumber = (value: unknown): boolean => value == null || (typeof value === "string" && (/^\**$/.test(value) || /^\*+[0-9]{4}$/.test(value)));
+
 export function redact(
   value: unknown,
   keys: string[] = [],
@@ -77,7 +87,9 @@ export function redact(
   if (value !== null && typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (isSensitiveKey(k, keys)) {
+      if (isAccountNumberKey(k)) {
+        result[k] = maskAccountNumber(v);
+      } else if (isSensitiveKey(k, keys)) {
         result[k] = "[REDACTED]";
       } else if (level === "strict" && STRICT_ID_KEYS.has(k)) {
         result[k] = hashId(v);

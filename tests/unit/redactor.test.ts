@@ -53,3 +53,36 @@ describe("partner update audit persistence", () => {
     await expect(appendPartnerUpdateAudit("/tmp/partner-update-audit-test", { ...entry({}), task_id: `job ${leak}` })).rejects.toThrow(/redact leak/);
   });
 });
+
+describe("bank account number masking", () => {
+  it("masks account_number to its last four digits and keeps account and bank names", () => {
+    expect(redact({ partner_bank_account_attributes: { account_number: "1234567", account_name: "カンタロウ", long_account_name: "サンプルカナ", bank_name: "サンプル銀行", branch_name: "テスト支店" } })).toEqual({
+      partner_bank_account_attributes: { account_number: "***4567", account_name: "カンタロウ", long_account_name: "サンプルカナ", bank_name: "サンプル銀行", branch_name: "テスト支店" },
+    });
+  });
+
+  it.each([["1234", "****"], ["12", "**"], ["", ""], [null, null], [1234567, "***4567"]])("masks short or odd account_number %j", (value, masked) => {
+    expect(redact({ account_number: value })).toEqual({ account_number: masked });
+  });
+
+  const entry = (payload_redacted: unknown) => ({
+    timestamp: "2026-09-08T00:00:00.000Z", task_id: "job", event: "partner_update" as const,
+    mode: "execute" as const, status: "updated" as const, company_id: 1, partner_id: 100,
+    payload_redacted, ignored: [], put_state: "succeeded" as const,
+  });
+
+  it("rejects an update audit entry that carries a full account number", async () => {
+    await expect(appendPartnerUpdateAudit("/tmp/partner-update-audit-test", entry({ partner_bank_account_attributes: { account_number: "1234567" } }))).rejects.toThrow(/redact leak/);
+  });
+
+  it("persists a masked account number", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "partner-update-audit-"));
+    try {
+      const value = entry({ partner_bank_account_attributes: { account_number: "***4567", account_name: "カンタロウ" } });
+      await appendPartnerUpdateAudit(dir, value);
+      const text = await readFile(join(dir, "freee-partner-update-2026-09-08.jsonl"), "utf8");
+      expect(text).not.toContain("1234567");
+      expect(JSON.parse(text)).toEqual(value);
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+});

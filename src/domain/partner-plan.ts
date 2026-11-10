@@ -136,9 +136,36 @@ export function parsePartnerPlan(raw: unknown): PartnerPlan {
   return plan as unknown as PartnerPlan;
 }
 
+export type PartnerBankAccountType = "ordinary" | "checking" | "earmarked" | "savings" | "other";
+export interface PartnerBankAccount {
+  bank_name?: string; bank_name_kana?: string; bank_code?: string;
+  branch_name?: string; branch_kana?: string; branch_code?: string;
+  account_type?: PartnerBankAccountType; account_number: string;
+  long_account_name?: string; account_name?: string;
+}
+export const PARTNER_BANK_ACCOUNT_KEY = "partner_bank_account_attributes";
+/**
+ * Update-only bank account fields (freee-api-schema v2020_06_15 partnerUpdateParams).
+ * Formats are checked before sending: bank_code 4 digits, branch_code 3 digits, account_number 7 digits.
+ * account_type rejects "" (the API would silently replace it with ordinary).
+ */
+export const PARTNER_BANK_ACCOUNT_FIELDS: readonly PartnerPlanField[] = [
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "bank_name"], type: "string", validValue: "サンプル銀行" },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "bank_name_kana"], type: "string", validValue: "サンプルギンコウ" },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "bank_code"], type: "string", validValue: "0001", pattern: /^[0-9]{4}$/ },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "branch_name"], type: "string", validValue: "テスト支店" },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "branch_kana"], type: "string", validValue: "テストシテン" },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "branch_code"], type: "string", validValue: "101", pattern: /^[0-9]{3}$/ },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "account_type"], type: "string", validValue: "ordinary", enum: ["ordinary", "checking", "earmarked", "savings", "other"] },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "account_number"], type: "string", validValue: "1234567", pattern: /^[0-9]{7}$/ },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "long_account_name"], type: "string", validValue: "カブシキガイシャサンプル" },
+  { path: [PARTNER_BANK_ACCOUNT_KEY, "account_name"], type: "string", validValue: "カブシキガイシャサンプル" },
+];
+
 export type PartnerUpdatePlan = Omit<PartnerPlan, "name" | "payment_term_attributes" | "invoice_payment_term_attributes"> & {
   name?: string;
   available?: boolean;
+  partner_bank_account_attributes?: PartnerBankAccount;
   payment_term_attributes?: PaymentTerm | null;
   invoice_payment_term_attributes?: PaymentTerm | null;
 };
@@ -146,7 +173,9 @@ export type PartnerUpdatePlan = Omit<PartnerPlan, "name" | "payment_term_attribu
 const updateFields: readonly PartnerPlanField[] = [
   ...PARTNER_PLAN_FIELDS.map((field) => field.path[0] === "name" ? { ...field, required: false } : field),
   { path: ["available"], type: "boolean", validValue: true },
+  ...PARTNER_BANK_ACCOUNT_FIELDS,
 ];
+const updateForbidden = new Set([...forbidden].filter((key) => key !== PARTNER_BANK_ACCOUNT_KEY));
 const updateTree: FieldNode = { children: new Map() };
 for (const field of updateFields) {
   let node = updateTree;
@@ -158,7 +187,7 @@ for (const field of updateFields) {
 export function parsePartnerUpdatePlan(raw: unknown): PartnerUpdatePlan {
   const input = isRecord(raw) ? structuredClone(raw) : fail("plan must be a single JSON object");
   if (Object.keys(input).length === 0) fail("plan must not be empty");
-  for (const key of Object.keys(input)) if (forbidden.has(key) || key === "code") fail(`${key} must not be included in the plan`);
+  for (const key of Object.keys(input)) if (updateForbidden.has(key) || key === "code") fail(`${key} must not be included in the plan`);
   for (const path of [["org_code"], ["invoice_registration_number"], ["partner_doc_setting_attributes", "sending_method"]] as const) {
     if (getPath(input, path) === null) fail(`${path.join(".")} must not be null`);
   }
@@ -169,6 +198,8 @@ export function parsePartnerUpdatePlan(raw: unknown): PartnerUpdatePlan {
     if (term !== undefined && (!isRecord(term) || ["cutoff_day", "additional_months", "fixed_day"].some((part) => !(part in term)))) fail(`${key} must include cutoff_day, additional_months, and fixed_day`);
   }
   validateShape(input, updateTree);
+  // account_number is required whenever an account is sent, so --expect-account-last4 always has something to match.
+  if (input[PARTNER_BANK_ACCOUNT_KEY] !== undefined && getPath(input, [PARTNER_BANK_ACCOUNT_KEY, "account_number"]) === undefined) fail(`${PARTNER_BANK_ACCOUNT_KEY}.account_number is required`);
   const plan: Record<string, unknown> = {};
   copyContainers(input, updateTree, plan);
   for (const field of updateFields) {

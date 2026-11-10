@@ -384,7 +384,7 @@ freee partners create --company-id 1234567 --plan ./partner-plan.json
 freee partners create --company-id 1234567 --plan ./partner-plan.json --execute
 ```
 
-plan は `POST /api/1/partners` の body のうち、CLI が対応する項目だけを書いた JSON です（許可する項目は [`src/domain/partner-plan.ts`](./src/domain/partner-plan.ts)）。body を `partner` でラップしません。`company_id` と、口座・振込に関わる `payer_walletable_id` / `transfer_fee_handling_side` / `partner_bank_account_attributes`、未知のキーは拒否します。
+plan は `POST /api/1/partners` の body のうち、CLI が対応する項目だけを書いた JSON です（許可する項目は [`src/domain/partner-plan.ts`](./src/domain/partner-plan.ts)）。body を `partner` でラップしません。`company_id` と、口座・振込に関わる `payer_walletable_id` / `transfer_fee_handling_side` / `partner_bank_account_attributes`、未知のキーは拒否します（振込先口座の登録は `partners update` でだけ使えます。後述）。
 
 ```json
 {"name":"株式会社サンプル","code":"sample","default_title":"御中","country_code":"JP"}
@@ -410,6 +410,46 @@ freee partners update --company-id 1234567 --id 100 --plan ./partner-update.json
 ```
 
 - PUT 後に読み戻しを行います。指定値との一致を確認できなかった項目は `updated.ignored` に出ます。**空でなくても終了コードは成功**なので、実行後に確認してください。結果不明で終了した場合は、再実行せず freee Web で対象を確認してください。
+
+#### 振込先口座の登録（update のみ・dry-run 既定）
+
+`partner_bank_account_attributes` は `partners update` の plan でだけ受け付けます（`partners create` では従来どおり拒否します）。`payer_walletable_id` / `transfer_fee_handling_side` は update でも拒否します。
+
+```bash
+# dry-run（既定）: 変更前の口座と送信予定の口座を並べて出す
+freee partners update --company-id 1 --id 100 --plan ./partner-bank-account.json
+
+# 実行（口座が未登録の取引先へ追加）
+freee partners update --company-id 1 --id 100 --plan ./partner-bank-account.json --expect-name "株式会社サンプル" --expect-account-last4 4567 --execute
+
+# 実行（登録済みの口座を上書き）
+freee partners update --company-id 1 --id 100 --plan ./partner-bank-account.json --expect-name "株式会社サンプル" --expect-account-last4 4567 --allow-replace-bank-account --execute
+```
+
+```json
+{
+  "partner_bank_account_attributes": {
+    "bank_name": "サンプル銀行",
+    "bank_name_kana": "サンプルギンコウ",
+    "bank_code": "0001",
+    "branch_name": "テスト支店",
+    "branch_kana": "テストシテン",
+    "branch_code": "101",
+    "account_type": "ordinary",
+    "account_number": "1234567",
+    "long_account_name": "カブシキガイシャサンプル",
+    "account_name": "カブシキガイシャサンプル"
+  }
+}
+```
+
+- 子キーは上の10個だけで、未知のキーは拒否します。`account_number` は必須です（`--expect-account-last4` と照合するため）。
+- 送信前に形式を確かめます。`bank_code` は数字4桁、`branch_code` は数字3桁、`account_number` は数字7桁です。
+- `account_type` は `ordinary` / `checking` / `earmarked` / `savings` / `other` のいずれかです。空文字は拒否します（API は空文字を `ordinary` に置き換えるため）。省略すると既存の値を維持します。
+- 出力（`changes` / `payload` / `bankAccount` / `updated.bankAccount`）と監査ログでは、口座番号を下4桁以外伏せます（例: `***4567`）。PUT にはそのままの番号を送ります。名義・銀行名・支店名は伏せません。
+- `--execute` では `--expect-account-last4 <4桁>` が必須で、plan の口座番号の下4桁と一致しなければ**認証の前に**止めます。dry-run でも指定すれば照合します。plan に口座が無いのに指定するとエラーです。
+- GET した取引先に口座が登録済みなら、`--allow-replace-bank-account` が無い限り PUT せずに止めます（dry-run の `bankAccount.registered` で確かめられます）。
+- PUT 後の読み戻しで、plan に含めた口座の項目が1つでも違えば `updated.ignored` で済ませず**終了コード 1** で失敗します。エラーには項目名だけを出し、口座番号は出しません。更新済みの可能性があるので、再実行せず freee Web で確かめてください。
 
 ### 請求書
 
@@ -707,7 +747,7 @@ plan v2はCLIルートからの引数配列を`commands`に含むJSONで、最�
 
 `deals create`と`receipts upload`もdry-runが既定で、`--execute`時に書き込む。これらを含め、実行前に対象とplan内容を確認すること。
 
-`invoices create` / `update` / `cancel` / `uncancel`、`quotations create` / `cancel` / `uncancel`、`partners create`、`partners update` は dry-run が既定だが、plan に `--execute` を含めると runtime OAuth 経由でも実際に API write をする。`invoices update --execute` / `cancel --execute` / `uncancel --execute` には `--expect-invoice-number` が、`quotations cancel --execute` / `uncancel --execute` には `--expect-quotation-number` が、`partners update --execute` には `--expect-name` が必須である。実行前に対象と plan 内容を確認すること。
+`invoices create` / `update` / `cancel` / `uncancel`、`quotations create` / `cancel` / `uncancel`、`partners create`、`partners update` は dry-run が既定だが、plan に `--execute` を含めると runtime OAuth 経由でも実際に API write をする。`invoices update --execute` / `cancel --execute` / `uncancel --execute` には `--expect-invoice-number` が、`quotations cancel --execute` / `uncancel --execute` には `--expect-quotation-number` が、`partners update --execute` には `--expect-name` が（plan に `partner_bank_account_attributes` を含むときはさらに `--expect-account-last4` が、登録済み口座の上書きには `--allow-replace-bank-account` が）必須である。実行前に対象と plan 内容を確認すること。
 
 - 事前の検証は、planの形・コマンド数・上表の接頭辞までで、各コマンドのオプションや参照先のplan JSONの中身は実行時に検証される。
 - `commands` は**先頭から 1 つずつ実行し、失敗した時点で止まる**。先に成功した書き込みは取り消さず、途中から再開する機能もない。失敗したら各コマンドの結果を確かめ、実行済みの作成コマンドを含む plan を丸ごと再実行しない。
