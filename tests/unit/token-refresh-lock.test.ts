@@ -101,16 +101,30 @@ describe("withTokenRefreshLock", () => {
       }
     });
     const callback = vi.fn();
-    const started = performance.now();
-    await expect(withTokenRefreshLock("alpha", { lockDir, isProcessAlive: () => false }, callback))
-      .rejects.toThrow("既に実行中です");
-    expect(performance.now() - started).toBeLessThan(1000);
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "setImmediate"] });
+    const timeout = vi.spyOn(globalThis, "setTimeout");
+    const interval = vi.spyOn(globalThis, "setInterval");
+    const immediate = vi.spyOn(globalThis, "setImmediate");
+    try {
+      // File I/O must finish without advancing time or scheduling a retry.
+      await expect(withTokenRefreshLock("alpha", { lockDir, isProcessAlive: () => false }, callback))
+        .rejects.toThrow("既に実行中です");
+      expect(timeout).not.toHaveBeenCalled();
+      expect(interval).not.toHaveBeenCalled();
+      expect(immediate).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      timeout.mockRestore();
+      interval.mockRestore();
+      immediate.mockRestore();
+      vi.useRealTimers();
+    }
     expect(removals).toBe(1);
     expect(vi.mocked(link).mock.calls.filter(([, target]) => target === path)).toHaveLength(2);
     expect(callback).not.toHaveBeenCalled();
     expect(await readFile(path, "utf8")).toBe("999998 competing\n");
     expect(await readdir(lockDir)).toEqual(["alpha.lock"]);
-  }, 2000);
+  });
 
   it("fails when another reclaimer holds the exclusive reclaim file", async () => {
     await mkdir(lockDir, { recursive: true });
